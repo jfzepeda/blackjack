@@ -31,6 +31,16 @@ header h1 {
   text-shadow: 0 2px 0 rgba(0,0,0,0.4);
   flex: 0 0 auto;
 }
+header .back {
+  color: #cfd8dc;
+  text-decoration: none;
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.1);
+}
+header .back:hover { background: rgba(255,255,255,0.15); }
 .host-badge {
   display: none;
   background: linear-gradient(180deg, #ffd76a, #c79b25);

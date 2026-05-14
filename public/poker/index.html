@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Texas Hold'em LAN</title>
+<link rel="stylesheet" href="/poker/style.css" />
+</head>
+<body>
+<div id="app">
+  <header>
+    <a href="/" class="back">← Lobby</a>
+    <h1>♦ Texas Hold'em ♣</h1>
+    <div id="hostBadge" class="host-badge">HOST ★</div>
+    <div id="phase" class="phase">Conectando…</div>
+    <div id="timer" class="timer"></div>
+  </header>
+
+  <main>
+    <section class="board">
+      <div class="board-info">
+        <div class="pot-label">Bote</div>
+        <div id="pot" class="pot">0</div>
+        <div id="bet-info" class="bet-line"></div>
+      </div>
+      <div id="community" class="community"></div>
+    </section>
+
+    <section id="table" class="table"></section>
+  </main>
+
+  <footer>
+    <div id="controls" class="controls"></div>
+    <div id="log" class="log"></div>
+    <div class="rules">
+      Texas Hold'em No-Limit · 6 max · Blinds 5/10 · Stack inicial 1000 ·
+      Solo el HOST puede dar rebuys
+    </div>
+  </footer>
+
+  <div id="joinModal" class="modal">
+    <div class="modal-box">
+      <h2>Unirse a la mesa</h2>
+      <p>Stack inicial: 1000. Blinds 5/10.</p>
+      <input id="nameInput" type="text" maxlength="16" placeholder="Tu nombre" autofocus />
+      <button id="joinBtn">Sentarme</button>
+      <p class="hint">Se necesitan 2 jugadores para empezar.<br>Hasta 6 en la mesa.</p>
+    </div>
+  </div>
+</div>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/poker/client.js"></script>
+</body>
+</html>

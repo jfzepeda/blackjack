@@ -1,0 +1,103 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background:
+    radial-gradient(ellipse at top, #0b6b3a 0%, #053a1f 60%, #021a0e 100%);
+  color: #f3f3f3;
+  min-height: 100vh;
+}
+.lobby {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 40px 20px 60px;
+  text-align: center;
+}
+.lobby header { margin-bottom: 36px; }
+.logo {
+  font-size: 36px;
+  letter-spacing: 8px;
+  color: #ffd76a;
+  text-shadow: 0 3px 0 rgba(0,0,0,0.4);
+}
+.lobby h1 {
+  margin: 8px 0 4px;
+  font-size: 40px;
+  letter-spacing: 2px;
+  color: #ffd76a;
+}
+.lobby header p {
+  color: #cfd8dc;
+  margin: 0;
+}
+.games {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+  margin-top: 30px;
+}
+.game-card {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  background: rgba(0,0,0,0.4);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 20px;
+  padding: 28px 24px;
+  position: relative;
+  transition: transform 0.15s ease, border-color 0.15s, box-shadow 0.15s;
+  overflow: hidden;
+}
+.game-card:hover {
+  transform: translateY(-4px);
+  border-color: #ffd76a;
+  box-shadow: 0 14px 32px rgba(0,0,0,0.5);
+}
+.game-card.bj { background: linear-gradient(160deg, rgba(13,90,50,0.7), rgba(5,58,31,0.95)); }
+.game-card.pk { background: linear-gradient(160deg, rgba(90,30,30,0.7), rgba(58,15,15,0.95)); }
+.card-emoji {
+  font-size: 80px;
+  line-height: 1;
+  margin-bottom: 8px;
+  text-shadow: 0 6px 14px rgba(0,0,0,0.4);
+}
+.game-card.pk .card-emoji { color: #ef4444; }
+.game-card.bj .card-emoji { color: #ffd76a; }
+.game-card h2 {
+  margin: 8px 0 2px;
+  font-size: 26px;
+  letter-spacing: 1px;
+}
+.tagline {
+  margin: 0 0 12px;
+  color: #cfd8dc;
+  font-size: 13px;
+}
+.game-card ul {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 20px;
+  font-size: 13px;
+  color: #e0e0e0;
+}
+.game-card li {
+  padding: 4px 0;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+.game-card li:first-child { border-top: 0; }
+.game-card strong { color: #ffd76a; }
+.cta {
+  display: inline-block;
+  background: #ffd76a;
+  color: #1a1a1a;
+  font-weight: 800;
+  padding: 10px 18px;
+  border-radius: 999px;
+  letter-spacing: 0.5px;
+}
+.game-card.pk .cta { background: #ef4444; color: white; }
+footer {
+  margin-top: 40px;
+  font-size: 12px;
+  color: #607d8b;
+}
