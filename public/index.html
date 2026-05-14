@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Blackjack LAN</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>♠ Blackjack ♥</h1>
+    <div id="hostBadge" class="host-badge">HOST ★</div>
+    <div id="phase" class="phase">Conectando…</div>
+    <div id="timer" class="timer"></div>
+  </header>
+
+  <main>
+    <section id="dealer" class="dealer">
+      <div class="label">Crupier <span id="dealerTotal"></span></div>
+      <div id="dealerHand" class="hand"></div>
+    </section>
+
+    <section id="table" class="table"></section>
+  </main>
+
+  <footer>
+    <div id="controls" class="controls"></div>
+    <div id="log" class="log"></div>
+    <div class="rules">
+      Blackjack 3:2 · Crupier se planta en 17 · Doblar / Dividir / Rendirse ·
+      Side bet <strong>Mayor/Menor 13</strong> paga 1:1 · <strong>★13 jackpot 10:1</strong>
+    </div>
+  </footer>
+
+  <div id="joinModal" class="modal">
+    <div class="modal-box">
+      <h2>Unirse a la mesa</h2>
+      <p>Fichas iniciales: 1000. Apuesta mínima: 10.</p>
+      <input id="nameInput" type="text" maxlength="16" placeholder="Tu nombre" autofocus />
+      <button id="joinBtn">Sentarme</button>
+      <p class="hint">Si te quedas en 0, el HOST puede darte fichas.<br>Hasta 6 jugadores.</p>
+    </div>
+  </div>
+</div>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/client.js"></script>
+</body>
+</html>
