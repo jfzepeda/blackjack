@@ -18,19 +18,41 @@
 
   <main>
     <section id="dealer" class="dealer">
-      <div class="label">Crupier <span id="dealerTotal"></span></div>
+      <div class="dealer-header">
+        <span class="dealer-badge">CRUPIER</span>
+        <span id="dealerTotal" class="dealer-total"></span>
+      </div>
       <div id="dealerHand" class="hand"></div>
     </section>
 
     <section id="feltMat" class="felt-mat">
-      <div class="felt-arc-text">BLACKJACK PAYS 3 TO 2 · INSURANCE PAYS 2 TO 1</div>
+      <div class="felt-banner" aria-hidden="true">
+        <div class="banner-ribbon banner-1">BLACKJACK PAYS <em>3 to 2</em></div>
+        <div class="banner-ribbon banner-2">INSURANCE PAYS <em>2 to 1</em></div>
+      </div>
+      <svg class="felt-curve" viewBox="0 0 1000 60" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M 18 6 Q 500 86 982 6"/>
+      </svg>
       <div id="feltSlots" class="felt-slots"></div>
     </section>
 
     <div class="play-area">
       <section id="table" class="table"></section>
       <aside id="leaderboard" class="leaderboard">
-        <div class="lb-title">🏆 Marcador</div>
+        <div class="lb-title">
+          <span class="lb-title-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/>
+              <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/>
+              <path d="M4 22h16"/>
+              <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/>
+              <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/>
+              <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>
+            </svg>
+          </span>
+          Marcador
+          <span id="lbCount" class="lb-title-count"></span>
+        </div>
         <ol id="leaderboardList" class="lb-list"></ol>
       </aside>
     </div>

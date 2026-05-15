@@ -8,6 +8,7 @@ const tableEl = $("table");
 const controlsEl = $("controls");
 const logEl = $("log");
 const feltSlotsEl = $("feltSlots");
+const feltMatEl = $("feltMat");
 const leaderboardListEl = $("leaderboardList");
 const joinModal = $("joinModal");
 const joinBtn = $("joinBtn");
@@ -18,6 +19,9 @@ let myId = null;
 let isHost = false;
 let lastState = null;
 const MIN_BET = 10;
+
+// Inline casino chip icon used in the felt amount and bottom info
+const CHIP_ICO = `<svg class="chip-ico" viewBox="0 0 24 24" width="11" height="11" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="#ffd76a" stroke="#7a4622" stroke-width="2" stroke-dasharray="2.5 2"/><circle cx="12" cy="12" r="4" fill="#fff5c2" stroke="#7a4622" stroke-width="0.5"/></svg>`;
 
 // ====== Cookies / session ======
 const SESSION_COOKIE = "bj_session";
@@ -277,47 +281,72 @@ function renderLeaderboard(state) {
     if (b.chips !== a.chips) return b.chips - a.chips;
     return a.name.localeCompare(b.name);
   });
+
+  // Count summary in the title (e.g. "5/5")
+  const countEl = document.getElementById("lbCount");
+  if (countEl) countEl.textContent = `${sorted.length}/5`;
+
+  const RANK_META = { 1: "gold", 2: "silver", 3: "bronze" };
+
   leaderboardListEl.innerHTML = sorted
     .map((p, i) => {
       const rank = i + 1;
-      const rankCls =
-        rank === 1 ? "gold" : rank === 2 ? "silver" : rank === 3 ? "bronze" : "";
+      const medal = RANK_META[rank] || "";
       const cls = ["lb-row"];
+      if (medal) cls.push(`top${rank}`, "medal");
       if (p.id === myId) cls.push("me");
       if (p.id === state.currentTurn) cls.push("turn");
       if (!p.connected) cls.push("disconnected");
       if (p.chips < MIN_BET) cls.push("broke");
+
       const sb = p.sideBets || {};
       const totalBet =
         (p.bet || 0) + (sb.under || 0) + (sb.exact || 0) + (sb.over || 0);
-      const metaParts = [];
-      if (p.isHost) metaParts.push("HOST ★");
-      if (!p.connected) metaParts.push("desconectado");
-      if (totalBet > 0) metaParts.push(`apuesta ${totalBet}🪙`);
-      if (p.rebuyRequested) metaParts.push("✋ pidió fichas");
-      const hostBtn =
+
+      const tags = [];
+      if (p.isHost) tags.push(`<span class="lb-tag host">Host</span>`);
+      if (p.id === state.currentTurn)
+        tags.push(`<span class="lb-tag turn">Turno</span>`);
+      if (!p.connected) tags.push(`<span class="lb-tag disc">Offline</span>`);
+      if (p.rebuyRequested)
+        tags.push(`<span class="lb-tag req">Solicitó fichas</span>`);
+
+      const initial = (p.name || "?").trim().charAt(0).toUpperCase() || "?";
+
+      const betPill =
+        totalBet > 0
+          ? `<div class="lb-bet"><span class="lb-bet-amt">${totalBet}</span><span class="lb-bet-label">apuesta</span></div>`
+          : `<div class="lb-bet empty"><span class="lb-bet-amt">—</span><span class="lb-bet-label">sin apostar</span></div>`;
+
+      const rankCls = `lb-rank${medal ? ` medal ${medal}` : ""}`;
+      const rebuyBtn =
         isHost && p.id !== myId
           ? `<button class="lb-rebuy${
               p.rebuyRequested ? " urgent" : ""
-            }" data-id="${p.id}">${
-              p.rebuyRequested ? "✋ +1000" : "+1000"
-            }</button>`
+            }" data-id="${p.id}" aria-label="Dar 1000 fichas a ${escapeHtml(
+              p.name
+            )}">+1000</button>`
           : "";
+
       return `<li class="${cls.join(" ")}">
-        <div class="lb-line">
-          <span class="lb-rank ${rankCls}">${rank}</span>
-          <span class="lb-name">${escapeHtml(p.name)}${
+        <div class="${rankCls}">${rank}</div>
+        <div class="lb-avatar" aria-hidden="true">${escapeHtml(initial)}</div>
+        <div class="lb-info">
+          <div class="lb-name">${escapeHtml(p.name)}${
         p.id === myId ? " (tú)" : ""
-      }</span>
-          <span class="lb-chips">${p.chips}🪙</span>
+      }</div>
+          <div class="lb-tag-row">${tags.join("")}</div>
         </div>
-        <div class="lb-sub">
-          <span class="lb-meta">${metaParts.join(" · ") || "&nbsp;"}</span>
-          ${hostBtn}
+        <div class="lb-chips">
+          <span class="lb-chips-amt">${p.chips}</span>
+          <span class="lb-chips-label">fichas</span>
         </div>
+        ${betPill}
+        ${rebuyBtn}
       </li>`;
     })
     .join("");
+
   leaderboardListEl.querySelectorAll(".lb-rebuy").forEach((btn) => {
     btn.onclick = () => socket.emit("host_rebuy", btn.dataset.id);
   });
@@ -331,7 +360,11 @@ function render(state) {
     ? `(${state.dealer.total}${state.dealer.hideHole ? "+" : ""})`
     : "";
   const me = state.players.find((p) => p.id === myId);
-  tableEl.innerHTML = me ? renderPlayer(me, state) : "";
+  const hasHand = me && me.hands && me.hands.length > 0;
+  tableEl.innerHTML = me && hasHand ? renderPlayer(me, state) : "";
+  document
+    .querySelector(".play-area")
+    ?.classList.toggle("no-local-hand", !hasHand);
   syncFelt(state);
   renderLeaderboard(state);
   renderControls(state);
@@ -414,12 +447,35 @@ function buildStack(stackEl, amount, animate) {
   chips.forEach((d, i) => stackEl.appendChild(createChip(d, i, animate)));
 }
 
+function updateFeltCurve(N, useArc) {
+  const path = feltMatEl?.querySelector(".felt-curve path");
+  if (!path) return;
+  if (!useArc) {
+    // Flat layout (1-2 players): straight horizontal line
+    path.setAttribute("d", "M 18 28 L 982 28");
+    return;
+  }
+  // Parabolic dip matching the slot arc; deeper with more players
+  const dipSVG = 36 + (N - 3) * 4; // N=3 → 36, N=5 → 44
+  const cY = 2 * dipSVG - 6;
+  path.setAttribute("d", `M 18 6 Q 500 ${cY} 982 6`);
+}
+
 function syncFelt(state) {
   const seen = new Set();
-  for (const p of state.players) {
+  const N = state.players.length;
+  // Arc curve: kicks in at 3+ players. With 1-2 players, slots sit flat — the
+  // table curve below stays a horizontal line so they match.
+  const ARC_HEIGHT = 40;
+  const useArc = N >= 3;
+  updateFeltCurve(N, useArc);
+  for (let i = 0; i < state.players.length; i++) {
+    const p = state.players[i];
     seen.add(p.id);
     const total = totalBet(p);
     const prev = lastBets.has(p.id) ? lastBets.get(p.id) : null;
+    const x = N > 1 ? (i - (N - 1) / 2) / ((N - 1) / 2) : 0;
+    const arcY = useArc ? -ARC_HEIGHT * x * x : 0;
 
     let slot = feltSlotsEl.querySelector(`[data-pid="${p.id}"]`);
     if (!slot) {
@@ -427,7 +483,7 @@ function syncFelt(state) {
       slot.className = "felt-slot";
       slot.dataset.pid = p.id;
       slot.innerHTML = `
-        <div class="felt-slot-name"></div>
+        <div class="felt-slot-name"><span class="felt-slot-name-text"></span><span class="felt-slot-timer"></span></div>
         <div class="felt-hands"></div>
         <div class="chip-stack"><div class="chip-stack-shadow"></div></div>
         <div class="felt-slot-amt"></div>`;
@@ -440,11 +496,14 @@ function syncFelt(state) {
       handsEl.className = "felt-hands";
       slot.insertBefore(handsEl, slot.querySelector(".chip-stack"));
     }
+    slot.style.setProperty("--arc-y", `${arcY.toFixed(1)}px`);
     slot.classList.toggle("me", p.id === myId);
-    slot.querySelector(".felt-slot-name").textContent =
+    slot.classList.toggle("turn", p.id === state.currentTurn);
+    slot.classList.toggle("has-bet", total > 0);
+    slot.querySelector(".felt-slot-name-text").textContent =
       p.name + (p.id === myId ? " (tú)" : "");
-    slot.querySelector(".felt-slot-amt").textContent = total
-      ? `${total}🪙`
+    slot.querySelector(".felt-slot-amt").innerHTML = total
+      ? `${total} ${CHIP_ICO}`
       : "";
     // Render this player's hand(s) on the felt
     handsEl.innerHTML = renderFeltHands(p);
@@ -558,7 +617,7 @@ function renderControls(state) {
   else if (state.phase === "settle") info = "Próxima ronda en breve…";
   else if (state.phase === "dealing") info = "Cartas en camino…";
   else info = "Esperando jugadores…";
-  controlsEl.innerHTML = `<span class="bet-info">${info} · Fichas: <strong>${me.chips}🪙</strong></span>`;
+  controlsEl.innerHTML = `<span class="bet-info">${info} · Fichas: <strong>${me.chips}</strong>${CHIP_ICO}</span>`;
 }
 
 function cardRankValue(r) {
@@ -694,6 +753,7 @@ function renderBettingControls(me) {
 function updateTimer() {
   if (!lastState || !lastState.phaseEndsAt) {
     timerEl.textContent = "";
+    clearAllFeltTimers();
     return;
   }
   const remaining = Math.max(
@@ -705,6 +765,20 @@ function updateTimer() {
     (lastState.phase === "betting" ||
       (lastState.phase === "playing" && lastState.currentTurn === myId));
   timerEl.textContent = show ? `${remaining}s` : "";
+
+  // Mirror the playing-phase countdown on the active slot in the felt
+  clearAllFeltTimers();
+  if (lastState.phase === "playing" && remaining > 0) {
+    const activeTimer = feltSlotsEl.querySelector(
+      ".felt-slot.turn .felt-slot-timer"
+    );
+    if (activeTimer) activeTimer.textContent = `${remaining}s`;
+  }
+}
+function clearAllFeltTimers() {
+  feltSlotsEl
+    .querySelectorAll(".felt-slot-timer")
+    .forEach((t) => (t.textContent = ""));
 }
 setInterval(updateTimer, 250);
 
