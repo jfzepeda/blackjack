@@ -7,6 +7,8 @@ const dealerTotalEl = $("dealerTotal");
 const tableEl = $("table");
 const controlsEl = $("controls");
 const logEl = $("log");
+const feltSlotsEl = $("feltSlots");
+const leaderboardListEl = $("leaderboardList");
 const joinModal = $("joinModal");
 const joinBtn = $("joinBtn");
 const nameInput = $("nameInput");
@@ -16,6 +18,42 @@ let myId = null;
 let isHost = false;
 let lastState = null;
 const MIN_BET = 10;
+
+// ====== Cookies / session ======
+const SESSION_COOKIE = "bj_session";
+const NAME_COOKIE = "bj_name";
+function setCookie(name, value, days = 30) {
+  const exp = new Date(Date.now() + days * 864e5).toUTCString();
+  document.cookie = `${name}=${encodeURIComponent(
+    value
+  )}; expires=${exp}; path=/; SameSite=Lax`;
+}
+function getCookie(name) {
+  const m = document.cookie.match(
+    new RegExp("(?:^|; )" + name + "=([^;]*)")
+  );
+  return m ? decodeURIComponent(m[1]) : null;
+}
+function deleteCookie(name) {
+  document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+}
+function isValidName(n) {
+  return (
+    typeof n === "string" &&
+    n.length > 0 &&
+    n !== "[object Object]" &&
+    !/^\[object\s/.test(n)
+  );
+}
+let sessionId = getCookie(SESSION_COOKIE);
+let storedName = getCookie(NAME_COOKIE);
+// Self-heal a corrupted cookie from a prior buggy state ([object Object] etc.)
+if (storedName && !isValidName(storedName)) {
+  deleteCookie(NAME_COOKIE);
+  deleteCookie(SESSION_COOKIE);
+  storedName = null;
+  sessionId = null;
+}
 
 // Pending bet state (local until "Confirm")
 let pending = { main: 0, under: 0, exact: 0, over: 0 };
@@ -203,8 +241,13 @@ function renderPlayer(p, state) {
           .map((h) => {
             const hcls = ["hand"];
             if (h.isCurrent) hcls.push("current");
+            // Only render full-size cards in YOUR own panel; remote players'
+            // cards live on the felt mat above.
+            const cardsHtml = isMe
+              ? `<div class="hand-cards">${renderHand(h.cards)}</div>`
+              : "";
             return `<div class="${hcls.join(" ")}">
-          <div class="hand-cards">${renderHand(h.cards)}</div>
+          ${cardsHtml}
           <div class="hand-meta">
             <span class="total">${h.cards.length ? h.total : ""}</span>
             <span class="hand-bet">${
@@ -216,11 +259,6 @@ function renderPlayer(p, state) {
           })
           .join("");
 
-  const hostBtn =
-    isHost && !isMe
-      ? `<button class="host-rebuy" data-id="${p.id}">+1000 (host)</button>`
-      : "";
-
   return `<div class="${cls.join(" ")}">
     <div class="player-header">
       <span class="player-name">${escapeHtml(p.name)}${isMe ? " (tú)" : ""}${
@@ -230,8 +268,59 @@ function renderPlayer(p, state) {
     </div>
     <div class="hands">${handsHtml}</div>
     ${renderSideBets(p)}
-    ${hostBtn}
   </div>`;
+}
+
+function renderLeaderboard(state) {
+  if (!leaderboardListEl) return;
+  const sorted = [...state.players].sort((a, b) => {
+    if (b.chips !== a.chips) return b.chips - a.chips;
+    return a.name.localeCompare(b.name);
+  });
+  leaderboardListEl.innerHTML = sorted
+    .map((p, i) => {
+      const rank = i + 1;
+      const rankCls =
+        rank === 1 ? "gold" : rank === 2 ? "silver" : rank === 3 ? "bronze" : "";
+      const cls = ["lb-row"];
+      if (p.id === myId) cls.push("me");
+      if (p.id === state.currentTurn) cls.push("turn");
+      if (!p.connected) cls.push("disconnected");
+      if (p.chips < MIN_BET) cls.push("broke");
+      const sb = p.sideBets || {};
+      const totalBet =
+        (p.bet || 0) + (sb.under || 0) + (sb.exact || 0) + (sb.over || 0);
+      const metaParts = [];
+      if (p.isHost) metaParts.push("HOST ★");
+      if (!p.connected) metaParts.push("desconectado");
+      if (totalBet > 0) metaParts.push(`apuesta ${totalBet}🪙`);
+      if (p.rebuyRequested) metaParts.push("✋ pidió fichas");
+      const hostBtn =
+        isHost && p.id !== myId
+          ? `<button class="lb-rebuy${
+              p.rebuyRequested ? " urgent" : ""
+            }" data-id="${p.id}">${
+              p.rebuyRequested ? "✋ +1000" : "+1000"
+            }</button>`
+          : "";
+      return `<li class="${cls.join(" ")}">
+        <div class="lb-line">
+          <span class="lb-rank ${rankCls}">${rank}</span>
+          <span class="lb-name">${escapeHtml(p.name)}${
+        p.id === myId ? " (tú)" : ""
+      }</span>
+          <span class="lb-chips">${p.chips}🪙</span>
+        </div>
+        <div class="lb-sub">
+          <span class="lb-meta">${metaParts.join(" · ") || "&nbsp;"}</span>
+          ${hostBtn}
+        </div>
+      </li>`;
+    })
+    .join("");
+  leaderboardListEl.querySelectorAll(".lb-rebuy").forEach((btn) => {
+    btn.onclick = () => socket.emit("host_rebuy", btn.dataset.id);
+  });
 }
 
 function render(state) {
@@ -241,11 +330,141 @@ function render(state) {
   dealerTotalEl.textContent = state.dealer.hand.length
     ? `(${state.dealer.total}${state.dealer.hideHole ? "+" : ""})`
     : "";
-  tableEl.innerHTML = state.players.map((p) => renderPlayer(p, state)).join("");
-  tableEl.querySelectorAll(".host-rebuy").forEach((btn) => {
-    btn.onclick = () => socket.emit("host_rebuy", btn.dataset.id);
-  });
+  const me = state.players.find((p) => p.id === myId);
+  tableEl.innerHTML = me ? renderPlayer(me, state) : "";
+  syncFelt(state);
+  renderLeaderboard(state);
   renderControls(state);
+}
+
+function renderFeltHands(p) {
+  if (!p.hands || p.hands.length === 0) return "";
+  return p.hands
+    .map((h) => {
+      if (!h.cards || h.cards.length === 0) return "";
+      const cls = ["felt-hand-row"];
+      if (h.isCurrent) cls.push("current");
+      if (h.status === "busted" || h.result === "bust") cls.push("busted");
+      return `<div class="${cls.join(" ")}">${renderHand(h.cards)}</div>`;
+    })
+    .join("");
+}
+
+// ====== Felt / falling chips ======
+const lastBets = new Map(); // playerId -> last known total bet
+let feltInitialized = false;
+
+function totalBet(p) {
+  const sb = p.sideBets || {};
+  return (p.bet || 0) + (sb.under || 0) + (sb.exact || 0) + (sb.over || 0);
+}
+
+// Greedy chip denomination breakdown, capped to maxChips so giant bets
+// don't spam hundreds of chips on the felt.
+function chipBreakdown(amount, maxChips = 10) {
+  const denoms = [500, 100, 25, 10];
+  const out = [];
+  let r = amount;
+  for (const d of denoms) {
+    while (r >= d && out.length < maxChips) {
+      out.push(d);
+      r -= d;
+    }
+  }
+  if (r > 0 && out.length < maxChips) out.push(10);
+  return out;
+}
+
+function createChip(denom, stackIdx, animate) {
+  const chip = document.createElement("div");
+  chip.className = `felt-chip c${denom}` + (animate ? " dropping" : "");
+  // Small lateral wobble for stack variation
+  const dx = (Math.random() - 0.5) * 10;
+  // Random initial spin while falling
+  const ri = (Math.random() - 0.5) * 80;
+  // Tiny final rotation so the stack isn't perfectly aligned
+  const rf = (Math.random() - 0.5) * 14;
+  chip.style.setProperty("--dx", dx.toFixed(1) + "px");
+  chip.style.setProperty("--ri", ri.toFixed(1) + "deg");
+  chip.style.setProperty("--rf", rf.toFixed(1) + "deg");
+  chip.style.bottom = stackIdx * 4 + "px";
+  chip.style.zIndex = String(stackIdx + 1);
+  if (animate) {
+    chip.style.animationDelay = stackIdx * 70 + "ms";
+  } else {
+    chip.style.transform = `translate(calc(-50% + ${dx.toFixed(
+      1
+    )}px), 0) rotate(${rf.toFixed(1)}deg)`;
+  }
+  chip.textContent = denom;
+  return chip;
+}
+
+function buildStack(stackEl, amount, animate) {
+  // Remove old chips (keep the shadow element if present)
+  stackEl
+    .querySelectorAll(".felt-chip")
+    .forEach((c) => c.remove());
+  if (amount <= 0) {
+    stackEl.classList.remove("has-chips");
+    return;
+  }
+  stackEl.classList.add("has-chips");
+  const chips = chipBreakdown(amount);
+  chips.forEach((d, i) => stackEl.appendChild(createChip(d, i, animate)));
+}
+
+function syncFelt(state) {
+  const seen = new Set();
+  for (const p of state.players) {
+    seen.add(p.id);
+    const total = totalBet(p);
+    const prev = lastBets.has(p.id) ? lastBets.get(p.id) : null;
+
+    let slot = feltSlotsEl.querySelector(`[data-pid="${p.id}"]`);
+    if (!slot) {
+      slot = document.createElement("div");
+      slot.className = "felt-slot";
+      slot.dataset.pid = p.id;
+      slot.innerHTML = `
+        <div class="felt-slot-name"></div>
+        <div class="felt-hands"></div>
+        <div class="chip-stack"><div class="chip-stack-shadow"></div></div>
+        <div class="felt-slot-amt"></div>`;
+      feltSlotsEl.appendChild(slot);
+    }
+    // Migration: ensure existing slots (from older session) have felt-hands.
+    let handsEl = slot.querySelector(".felt-hands");
+    if (!handsEl) {
+      handsEl = document.createElement("div");
+      handsEl.className = "felt-hands";
+      slot.insertBefore(handsEl, slot.querySelector(".chip-stack"));
+    }
+    slot.classList.toggle("me", p.id === myId);
+    slot.querySelector(".felt-slot-name").textContent =
+      p.name + (p.id === myId ? " (tú)" : "");
+    slot.querySelector(".felt-slot-amt").textContent = total
+      ? `${total}🪙`
+      : "";
+    // Render this player's hand(s) on the felt
+    handsEl.innerHTML = renderFeltHands(p);
+
+    if (prev !== total) {
+      const stackEl = slot.querySelector(".chip-stack");
+      // Animate only when the bet GREW after the initial state sync.
+      const animate = feltInitialized && total > (prev || 0);
+      buildStack(stackEl, total, animate);
+    }
+    lastBets.set(p.id, total);
+  }
+  // Remove slots for players no longer in state
+  [...feltSlotsEl.children].forEach((slot) => {
+    if (!seen.has(slot.dataset.pid)) {
+      lastBets.delete(slot.dataset.pid);
+      slot.remove();
+    }
+  });
+  feltInitialized = true;
 }
 
 function getMe(state) {
@@ -263,7 +482,7 @@ function renderControls(state) {
   if (me.chips < MIN_BET && state.phase === "betting") {
     controlsEl.innerHTML = `<span class="bet-info danger">Sin fichas suficientes. ${
       isHost
-        ? "Tú eres el HOST — usa el botón de tu propio panel."
+        ? "Tú eres el HOST — usa el botón."
         : "Pide al HOST que te dé fichas."
     }</span>`;
     if (isHost) {
@@ -272,6 +491,15 @@ function renderControls(state) {
       wrap.textContent = "+1000 (host, tú)";
       wrap.onclick = () => socket.emit("host_rebuy", myId);
       controlsEl.appendChild(wrap);
+    } else {
+      const req = document.createElement("button");
+      req.className = "btn-primary";
+      req.textContent = me.rebuyRequested
+        ? "Solicitud enviada ✓"
+        : "Solicitar fichas al HOST";
+      req.disabled = !!me.rebuyRequested;
+      req.onclick = () => socket.emit("request_rebuy");
+      controlsEl.appendChild(req);
     }
     return;
   }
@@ -507,13 +735,28 @@ socket.on("hello", ({ isHost: h }) => {
   if (hostBadge) hostBadge.classList.toggle("show", isHost);
 });
 socket.on("state", render);
-socket.on("joined", ({ id, isHost: h }) => {
+socket.on("joined", ({ id, sessionId: sid, name, isHost: h }) => {
   myId = id;
   isHost = !!h;
+  if (sid && typeof sid === "string") {
+    sessionId = sid;
+    setCookie(SESSION_COOKIE, sid);
+  }
+  if (isValidName(name)) {
+    storedName = name;
+    setCookie(NAME_COOKIE, name);
+  }
   if (hostBadge) hostBadge.classList.toggle("show", isHost);
   joinModal.classList.add("hidden");
 });
-socket.on("error_msg", showToast);
+socket.on("error_msg", (msg) => {
+  showToast(msg);
+  // If auto-rejoin failed (table full, etc.), surface the modal again.
+  if (!myId) {
+    joinModal.classList.remove("hidden");
+    if (storedName) nameInput.value = storedName;
+  }
+});
 socket.on("log", ({ msg }) => {
   const div = document.createElement("div");
   div.textContent = msg;
@@ -522,7 +765,24 @@ socket.on("log", ({ msg }) => {
   logEl.scrollTop = logEl.scrollHeight;
 });
 
-joinBtn.onclick = () => socket.emit("join", nameInput.value.trim());
+// Auto-rejoin: if we have a saved session, hide the modal and try to reattach
+// on every connect (covers initial load + transient reconnects).
+if (sessionId && storedName) {
+  joinModal.classList.add("hidden");
+  nameInput.value = storedName;
+}
+socket.on("connect", () => {
+  if (sessionId && storedName) {
+    socket.emit("join", { name: storedName, sessionId });
+  }
+});
+
+joinBtn.onclick = () => {
+  const name = nameInput.value.trim();
+  if (!name) return;
+  socket.emit("join", { name, sessionId });
+};
 nameInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") joinBtn.click();
 });
+if (storedName && !nameInput.value) nameInput.value = storedName;

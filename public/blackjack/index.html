@@ -22,7 +22,18 @@
       <div id="dealerHand" class="hand"></div>
     </section>
 
-    <section id="table" class="table"></section>
+    <section id="feltMat" class="felt-mat">
+      <div class="felt-arc-text">BLACKJACK PAYS 3 TO 2 · INSURANCE PAYS 2 TO 1</div>
+      <div id="feltSlots" class="felt-slots"></div>
+    </section>
+
+    <div class="play-area">
+      <section id="table" class="table"></section>
+      <aside id="leaderboard" class="leaderboard">
+        <div class="lb-title">🏆 Marcador</div>
+        <ol id="leaderboardList" class="lb-list"></ol>
+      </aside>
+    </div>
   </main>
 
   <footer>
@@ -40,7 +51,7 @@
       <p>Fichas iniciales: 1000. Apuesta mínima: 10.</p>
       <input id="nameInput" type="text" maxlength="16" placeholder="Tu nombre" autofocus />
       <button id="joinBtn">Sentarme</button>
-      <p class="hint">Si te quedas en 0, el HOST puede darte fichas.<br>Hasta 6 jugadores.</p>
+      <p class="hint">Si te quedas en 0, pide fichas al HOST.<br>Hasta 5 jugadores.</p>
     </div>
   </div>
 </div>
