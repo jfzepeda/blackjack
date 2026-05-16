@@ -1,6 +1,7 @@
 const socket = io("/blackjack");
 const $ = (id) => document.getElementById(id);
 const phaseEl = $("phase");
+const phaseLabelEl = phaseEl?.querySelector(".phase-label") || phaseEl;
 const timerEl = $("timer");
 const dealerHandEl = $("dealerHand");
 const dealerTotalEl = $("dealerTotal");
@@ -255,7 +256,7 @@ function renderPlayer(p, state) {
           <div class="hand-meta">
             <span class="total">${h.cards.length ? h.total : ""}</span>
             <span class="hand-bet">${
-              h.bet ? `${h.bet}🪙${h.doubled ? " (x2)" : ""}` : ""
+              h.bet ? `${h.bet}${CHIP_ICO}${h.doubled ? " (x2)" : ""}` : ""
             }</span>
             ${handResultBadge(h)}
           </div>
@@ -268,7 +269,7 @@ function renderPlayer(p, state) {
       <span class="player-name">${escapeHtml(p.name)}${isMe ? " (tú)" : ""}${
     p.isHost ? " ★" : ""
   }</span>
-      <span class="player-chips">${p.chips}🪙</span>
+      <span class="player-chips">${p.chips}${CHIP_ICO}</span>
     </div>
     <div class="hands">${handsHtml}</div>
     ${renderSideBets(p)}
@@ -354,7 +355,7 @@ function renderLeaderboard(state) {
 
 function render(state) {
   lastState = state;
-  phaseEl.textContent = phaseLabel(state.phase);
+  phaseLabelEl.textContent = phaseLabel(state.phase);
   dealerHandEl.innerHTML = renderHand(state.dealer.hand);
   dealerTotalEl.textContent = state.dealer.hand.length
     ? `(${state.dealer.total}${state.dealer.hideHole ? "+" : ""})`
@@ -599,9 +600,9 @@ function renderControls(state) {
       }>Rendirse</button>
       <span class="bet-info">Mano ${me.currentHandIdx ?? 0}: <strong>${
       hand.total
-    }</strong> · Apuesta <strong>${hand.bet}🪙</strong> · Fichas <strong>${
+    }</strong> · Apuesta <strong>${hand.bet}${CHIP_ICO}</strong> · Fichas <strong>${
       me.chips
-    }🪙</strong></span>
+    }${CHIP_ICO}</strong></span>
     `;
     $("hitBtn").onclick = () => socket.emit("hit");
     $("standBtn").onclick = () => socket.emit("stand");
@@ -696,7 +697,7 @@ function renderBettingControls(me) {
   }
       </button>
     </div>
-    <div class="bet-info">Banco: <strong>${remaining}🪙</strong> de ${totalBank} · ${
+    <div class="bet-info">Banco: <strong>${remaining}${CHIP_ICO}</strong> de ${totalBank} · ${
     isDirty ? "<em>sin confirmar</em>" : "apuesta confirmada"
   }</div>
   `;
@@ -753,6 +754,7 @@ function renderBettingControls(me) {
 function updateTimer() {
   if (!lastState || !lastState.phaseEndsAt) {
     timerEl.textContent = "";
+    timerEl.classList.remove("urgent");
     clearAllFeltTimers();
     return;
   }
@@ -765,6 +767,7 @@ function updateTimer() {
     (lastState.phase === "betting" ||
       (lastState.phase === "playing" && lastState.currentTurn === myId));
   timerEl.textContent = show ? `${remaining}s` : "";
+  timerEl.classList.toggle("urgent", show && remaining <= 5);
 
   // Mirror the playing-phase countdown on the active slot in the felt
   clearAllFeltTimers();

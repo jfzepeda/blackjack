@@ -4,46 +4,69 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
 <title>Texas Hold'em LAN</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://api.fontshare.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@700,600,500,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/poker/style.css" />
 </head>
 <body>
+<div class="aurora aurora-1" aria-hidden="true"></div>
+<div class="aurora aurora-2" aria-hidden="true"></div>
+<div class="aurora aurora-3" aria-hidden="true"></div>
+
 <div id="app">
-  <header>
-    <a href="/" class="back">← Lobby</a>
-    <h1>♦ Texas Hold'em ♣</h1>
-    <div id="hostBadge" class="host-badge">HOST ★</div>
-    <div id="phase" class="phase">Conectando…</div>
-    <div id="timer" class="timer"></div>
+  <header class="glass app-header">
+    <a href="/" class="back" aria-label="Volver al lobby">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+      <span>Lobby</span>
+    </a>
+    <h1>
+      <span class="suit suit-d" aria-hidden="true">♦</span>
+      Texas Hold'em
+      <span class="suit suit-c" aria-hidden="true">♣</span>
+    </h1>
+    <div id="hostBadge" class="host-badge" aria-label="Anfitrión">HOST <span aria-hidden="true">★</span></div>
+    <div id="phase" class="phase">
+      <span class="phase-dot" aria-hidden="true"></span>
+      <span class="phase-label">Conectando…</span>
+    </div>
+    <div id="timer" class="timer" aria-live="polite"></div>
   </header>
 
   <main>
-    <section class="board">
-      <div class="board-info">
-        <div class="pot-label">Bote</div>
-        <div id="pot" class="pot">0</div>
-        <div id="bet-info" class="bet-line"></div>
+    <section class="board glass" aria-label="Mesa de juego">
+      <div class="board-inner">
+        <div id="potArea" class="pot-area">
+          <div class="pot-label">BOTE</div>
+          <div class="pot-value">
+            <span id="pot" class="pot">0</span>
+          </div>
+          <div id="potStack" class="pot-stack" aria-hidden="true"></div>
+          <div id="bet-info" class="bet-line"></div>
+        </div>
+        <div id="community" class="community" aria-label="Cartas comunitarias"></div>
       </div>
-      <div id="community" class="community"></div>
     </section>
 
-    <section id="table" class="table"></section>
+    <section id="table" class="table" aria-label="Jugadores"></section>
   </main>
 
   <footer>
-    <div id="controls" class="controls"></div>
-    <div id="log" class="log"></div>
+    <div id="controls" class="controls glass" role="group" aria-label="Controles de turno"></div>
+    <div id="log" class="log glass" aria-live="polite" aria-label="Historial de acciones"></div>
     <div class="rules">
-      Texas Hold'em No-Limit · 6 max · Blinds 5/10 · Stack inicial 1000 ·
-      Solo el HOST puede dar rebuys
+      Texas Hold'em No-Limit · 6 max · Blinds 5/10 · Stack inicial 1000 · Solo el HOST puede dar rebuys
     </div>
   </footer>
 
-  <div id="joinModal" class="modal">
-    <div class="modal-box">
-      <h2>Unirse a la mesa</h2>
-      <p>Stack inicial: 1000. Blinds 5/10.</p>
-      <input id="nameInput" type="text" maxlength="16" placeholder="Tu nombre" autofocus />
-      <button id="joinBtn">Sentarme</button>
+  <div id="joinModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="joinTitle">
+    <div class="modal-box glass">
+      <h2 id="joinTitle">Unirse a la mesa</h2>
+      <p>Stack inicial: 1000 · Blinds 5/10</p>
+      <input id="nameInput" type="text" maxlength="16" placeholder="Tu nombre" autofocus aria-label="Nombre de jugador" />
+      <button id="joinBtn" class="btn-glass btn-primary">Sentarme</button>
       <p class="hint">Se necesitan 2 jugadores para empezar.<br>Hasta 6 en la mesa.</p>
     </div>
   </div>

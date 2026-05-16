@@ -601,16 +601,26 @@ function setupPoker(nsp) {
     game.timer = setTimeout(fn, ms);
   }
   function log(msg) { nsp.emit('log', { t: Date.now(), msg }); }
-  function broadcast() { nsp.emit('state', publicState()); }
+  function broadcast() {
+    // Per-socket emit with redacted hole cards for opponents.
+    // Prevents the server from leaking everyone's hole cards on the wire.
+    for (const [sid, sock] of nsp.sockets) {
+      sock.emit('state', publicStateFor(sid));
+    }
+  }
 
-  function publicState() {
+  function publicStateFor(forSocketId) {
     const curId = game.currentTurnIdx >= 0 ? game.handOrder[game.currentTurnIdx] : null;
     const players = game.order.map((id) => {
       const p = game.players.get(id);
+      const reveal = id === forSocketId || game.phase === 'showdown' || p.holeRevealed === true;
+      const hole = reveal
+        ? p.hole
+        : (p.hole || []).map(() => ({ r: '?', s: '?' }));
       return {
         id, name: p.name, chips: p.chips,
         bet: p.bet, totalBet: p.totalBet,
-        hole: p.hole,
+        hole,
         holeRevealed: p.holeRevealed,
         status: p.status,
         connected: p.connected,
@@ -963,7 +973,7 @@ function setupPoker(nsp) {
     const isHost = isLocalhostAddr(socket.handshake.address);
     socket.data.isHost = isHost;
     socket.emit('hello', { isHost });
-    socket.emit('state', publicState());
+    socket.emit('state', publicStateFor(socket.id));
 
     socket.on('join', (rawName) => {
       if (game.players.has(socket.id)) return;

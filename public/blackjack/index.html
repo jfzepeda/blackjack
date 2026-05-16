@@ -4,20 +4,39 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
 <title>Blackjack LAN</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://api.fontshare.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@700,600,500,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/blackjack/style.css" />
 </head>
 <body>
+<div class="aurora aurora-1" aria-hidden="true"></div>
+<div class="aurora aurora-2" aria-hidden="true"></div>
+<div class="aurora aurora-3" aria-hidden="true"></div>
+
 <div id="app">
-  <header>
-    <a href="/" class="back">← Lobby</a>
-    <h1>♠ Blackjack ♥</h1>
-    <div id="hostBadge" class="host-badge">HOST ★</div>
-    <div id="phase" class="phase">Conectando…</div>
-    <div id="timer" class="timer"></div>
+  <header class="glass app-header">
+    <a href="/" class="back" aria-label="Volver al lobby">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+      <span>Lobby</span>
+    </a>
+    <h1>
+      <span class="suit suit-s" aria-hidden="true">♠</span>
+      Blackjack
+      <span class="suit suit-h" aria-hidden="true">♥</span>
+    </h1>
+    <div id="hostBadge" class="host-badge" aria-label="Anfitrión">HOST <span aria-hidden="true">★</span></div>
+    <div id="phase" class="phase">
+      <span class="phase-dot" aria-hidden="true"></span>
+      <span class="phase-label">Conectando…</span>
+    </div>
+    <div id="timer" class="timer" aria-live="polite"></div>
   </header>
 
   <main>
-    <section id="dealer" class="dealer">
+    <section id="dealer" class="dealer glass">
       <div class="dealer-header">
         <span class="dealer-badge">CRUPIER</span>
         <span id="dealerTotal" class="dealer-total"></span>
@@ -26,10 +45,18 @@
     </section>
 
     <section id="feltMat" class="felt-mat">
-      <div class="felt-banner" aria-hidden="true">
-        <div class="banner-ribbon banner-1">BLACKJACK PAYS <em>3 to 2</em></div>
-        <div class="banner-ribbon banner-2">INSURANCE PAYS <em>2 to 1</em></div>
-      </div>
+      <svg class="felt-banner-svg" viewBox="0 0 600 95" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+        <defs>
+          <path id="bjInsuranceArc" d="M 150 42 Q 300 14 450 42" fill="none"/>
+          <path id="bjBlackjackArc" d="M 40 88 Q 300 26 560 88" fill="none"/>
+        </defs>
+        <text class="banner-insurance">
+          <textPath href="#bjInsuranceArc" startOffset="50%" text-anchor="middle">INSURANCE PAYS 2 to 1</textPath>
+        </text>
+        <text class="banner-blackjack">
+          <textPath href="#bjBlackjackArc" startOffset="50%" text-anchor="middle">BLACKJACK PAYS 3 to 2</textPath>
+        </text>
+      </svg>
       <svg class="felt-curve" viewBox="0 0 1000 60" preserveAspectRatio="none" aria-hidden="true">
         <path d="M 18 6 Q 500 86 982 6"/>
       </svg>
@@ -38,7 +65,7 @@
 
     <div class="play-area">
       <section id="table" class="table"></section>
-      <aside id="leaderboard" class="leaderboard">
+      <aside id="leaderboard" class="leaderboard glass">
         <div class="lb-title">
           <span class="lb-title-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -59,20 +86,20 @@
   </main>
 
   <footer>
-    <div id="controls" class="controls"></div>
-    <div id="log" class="log"></div>
+    <div id="controls" class="controls glass" role="group" aria-label="Controles"></div>
+    <div id="log" class="log glass" aria-live="polite" aria-label="Historial"></div>
     <div class="rules">
       Blackjack 3:2 · Crupier se planta en 17 · Doblar / Dividir / Rendirse ·
       Side bet <strong>Mayor/Menor 13</strong> paga 1:1 · <strong>★13 jackpot 10:1</strong>
     </div>
   </footer>
 
-  <div id="joinModal" class="modal">
-    <div class="modal-box">
-      <h2>Unirse a la mesa</h2>
-      <p>Fichas iniciales: 1000. Apuesta mínima: 10.</p>
-      <input id="nameInput" type="text" maxlength="16" placeholder="Tu nombre" autofocus />
-      <button id="joinBtn">Sentarme</button>
+  <div id="joinModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="joinTitle">
+    <div class="modal-box glass">
+      <h2 id="joinTitle">Unirse a la mesa</h2>
+      <p>Fichas iniciales: 1000 · Apuesta mínima: 10</p>
+      <input id="nameInput" type="text" maxlength="16" placeholder="Tu nombre" autofocus aria-label="Nombre de jugador" />
+      <button id="joinBtn" class="btn-glass btn-primary">Sentarme</button>
       <p class="hint">Si te quedas en 0, pide fichas al HOST.<br>Hasta 5 jugadores.</p>
     </div>
   </div>
