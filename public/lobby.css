@@ -55,6 +55,7 @@ body {
 }
 .game-card.bj { background: linear-gradient(160deg, rgba(13,90,50,0.7), rgba(5,58,31,0.95)); }
 .game-card.pk { background: linear-gradient(160deg, rgba(90,30,30,0.7), rgba(58,15,15,0.95)); }
+.game-card.un { background: linear-gradient(160deg, rgba(35,30,90,0.7), rgba(20,15,50,0.95)); }
 .card-emoji {
   font-size: 80px;
   line-height: 1;
@@ -63,6 +64,12 @@ body {
 }
 .game-card.pk .card-emoji { color: #ef4444; }
 .game-card.bj .card-emoji { color: #ffd76a; }
+.game-card.un .card-emoji {
+  color: #FFD700;
+  font-style: italic;
+  font-weight: 900;
+  -webkit-text-stroke: 3px #ED1C24;
+}
 .game-card h2 {
   margin: 8px 0 2px;
   font-size: 26px;
@@ -96,6 +103,7 @@ body {
   letter-spacing: 0.5px;
 }
 .game-card.pk .cta { background: #ef4444; color: white; }
+.game-card.un .cta { background: #ED1C24; color: #FFD700; font-style: italic; }
 footer {
   margin-top: 40px;
   font-size: 12px;

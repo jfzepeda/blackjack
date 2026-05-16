@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>UNO — Casino LAN</title>
+<link rel="stylesheet" href="/uno/style.css" />
+</head>
+<body>
+
+<!-- Join modal -->
+<div id="joinModal" class="modal">
+  <div class="modal-inner">
+    <div class="uno-wordmark">UNO</div>
+    <p class="tagline">Tradicional + reglas caseras</p>
+    <label for="nameInput">Tu nombre</label>
+    <input id="nameInput" type="text" maxlength="16" autocomplete="off" placeholder="Tu nombre…" />
+    <button id="joinBtn">Sentarme a la mesa</button>
+    <p class="hint">2–8 jugadores · stacking +2/+4 · jump-in · 7-0</p>
+  </div>
+</div>
+
+<!-- Color picker overlay -->
+<div id="colorPicker" class="overlay hidden">
+  <div class="overlay-inner">
+    <h3>Elige un color</h3>
+    <div class="color-options">
+      <button class="color-opt c-R" data-color="R">Rojo</button>
+      <button class="color-opt c-Y" data-color="Y">Amarillo</button>
+      <button class="color-opt c-G" data-color="G">Verde</button>
+      <button class="color-opt c-B" data-color="B">Azul</button>
+    </div>
+    <button class="overlay-cancel" id="colorCancel">Cancelar</button>
+  </div>
+</div>
+
+<!-- Swap target picker overlay -->
+<div id="swapPicker" class="overlay hidden">
+  <div class="overlay-inner">
+    <h3>Intercambiar mano con…</h3>
+    <div id="swapOptions" class="swap-options"></div>
+    <button class="overlay-cancel" id="swapCancel">Cancelar</button>
+  </div>
+</div>
+
+<!-- Winner banner -->
+<div id="winnerBanner" class="winner hidden">
+  <div class="winner-inner">
+    <div class="trophy">🏆</div>
+    <div class="winner-name" id="winnerName">—</div>
+    <div class="winner-sub">¡Ganador!</div>
+  </div>
+</div>
+
+<header class="topbar">
+  <a href="/" class="back-home" title="Lobby">←</a>
+  <div class="uno-wordmark small">UNO</div>
+  <div class="phase-pill" id="phase"><span class="phase-label">…</span></div>
+  <div class="timer" id="timer">—</div>
+  <div class="host-badge hidden" id="hostBadge">HOST ★</div>
+</header>
+
+<main class="table" id="tableMain">
+  <!-- Other players orbit -->
+  <div class="opponents" id="opponents"></div>
+
+  <!-- Center: draw + discard piles -->
+  <div class="center">
+    <div class="direction-arrow" id="directionArrow">
+      <svg viewBox="0 0 100 100" width="160" height="160" aria-hidden="true">
+        <circle cx="50" cy="50" r="44" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="2" stroke-dasharray="3 5"/>
+        <path id="arrowPath" d="M 50 6 A 44 44 0 0 1 94 50" fill="none" stroke="rgba(255,255,255,0.6)" stroke-width="3" stroke-linecap="round" marker-end="url(#arrowHead)"/>
+        <defs>
+          <marker id="arrowHead" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(255,255,255,0.8)"/>
+          </marker>
+        </defs>
+      </svg>
+    </div>
+    <div class="piles">
+      <button class="pile draw-pile" id="drawPile" title="Robar carta">
+        <div class="card-back">UNO</div>
+        <div class="pile-label">Robar</div>
+      </button>
+      <div class="pile discard-pile" id="discardPile">
+        <div class="color-ring" id="colorRing"></div>
+        <div id="discardCard"></div>
+      </div>
+    </div>
+    <div class="pending-draw hidden" id="pendingDraw">+0</div>
+  </div>
+
+  <!-- Bottom: my hand + action buttons -->
+  <div class="my-area">
+    <div class="action-row">
+      <button class="action-btn uno-btn" id="unoBtn" title="¡Dí UNO!">UNO!</button>
+      <button class="action-btn pass-btn hidden" id="passBtn">Pasar</button>
+      <div class="my-info">
+        <span class="my-name" id="myName">—</span>
+        <span class="my-count" id="myCount">0 cartas</span>
+      </div>
+    </div>
+    <div class="my-hand" id="myHand"></div>
+  </div>
+</main>
+
+<div class="log" id="log"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/uno/client.js"></script>
+</body>
+</html>

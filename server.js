@@ -15,6 +15,7 @@ const io = new Server(server);
 
 app.get('/blackjack', (req, res) => res.sendFile(path.join(__dirname, 'public/blackjack/index.html')));
 app.get('/poker',     (req, res) => res.sendFile(path.join(__dirname, 'public/poker/index.html')));
+app.get('/uno',       (req, res) => res.sendFile(path.join(__dirname, 'public/uno/index.html')));
 app.use(express.static(path.join(__dirname, 'public'), { redirect: false }));
 
 // ============================================================
@@ -1066,6 +1067,586 @@ function setupPoker(nsp) {
 }
 
 // ============================================================
+// UNO (namespace /uno) — Tradicional + house rules
+// ============================================================
+setupUno(io.of('/uno'));
+
+function setupUno(nsp) {
+  const MAX_SEATS = 8;
+  const MIN_PLAYERS = 2;
+  const TURN_TIME_MS = 30000;
+  const SESSION_GRACE_MS = 5 * 60 * 1000;
+  const INITIAL_HAND = 7;
+  const COLORS = ['R', 'Y', 'G', 'B'];
+
+  function buildUnoDeck() {
+    const cards = [];
+    for (const c of COLORS) {
+      cards.push({ color: c, value: 0 });
+      for (let n = 1; n <= 9; n++) { cards.push({ color: c, value: n }); cards.push({ color: c, value: n }); }
+      for (const a of ['skip', 'reverse', '+2']) { cards.push({ color: c, value: a }); cards.push({ color: c, value: a }); }
+    }
+    for (let i = 0; i < 4; i++) { cards.push({ color: 'W', value: 'wild' }); cards.push({ color: 'W', value: 'wild+4' }); }
+    for (let i = cards.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [cards[i], cards[j]] = [cards[j], cards[i]];
+    }
+    return cards;
+  }
+
+  const game = {
+    phase: 'waiting',
+    players: new Map(),
+    order: [],
+    currentTurnIdx: -1,
+    direction: 1,
+    drawPile: [],
+    discardPile: [],
+    discardTop: null,
+    activeColor: null,
+    pendingDraw: 0,
+    turnEndsAt: 0,
+    timer: null,
+    winnerId: null,
+    lastPlayerToReduce: null, // id of player who just played their penultimate card, must say UNO
+  };
+
+  function clearTimer() { if (game.timer) { clearTimeout(game.timer); game.timer = null; } }
+  function setTurnTimer() {
+    clearTimer();
+    game.turnEndsAt = Date.now() + TURN_TIME_MS;
+    game.timer = setTimeout(handleTurnTimeout, TURN_TIME_MS);
+  }
+
+  function broadcast() { nsp.emit('state', publicState()); }
+  function emitHand(socketId) {
+    const p = game.players.get(socketId);
+    if (!p) return;
+    nsp.to(socketId).emit('private:hand', { hand: p.hand });
+  }
+  function emitAllHands() { for (const id of game.order) emitHand(id); }
+  function log(msg) { nsp.emit('log', { t: Date.now(), msg }); }
+
+  function publicState() {
+    const curId = currentPlayerId();
+    const players = game.order.map((id) => {
+      const p = game.players.get(id);
+      return {
+        id, name: p.name,
+        cardCount: p.hand.length,
+        saidUno: p.saidUno,
+        connected: p.connected,
+        isHost: p.isHost,
+      };
+    });
+    return {
+      phase: game.phase,
+      players,
+      currentTurn: curId,
+      direction: game.direction,
+      discardTop: game.discardTop,
+      activeColor: game.activeColor,
+      pendingDraw: game.pendingDraw,
+      turnEndsAt: game.turnEndsAt,
+      winnerId: game.winnerId,
+      minPlayers: MIN_PLAYERS,
+      maxSeats: MAX_SEATS,
+    };
+  }
+
+  function currentPlayerId() {
+    return game.currentTurnIdx >= 0 ? game.order[game.currentTurnIdx] : null;
+  }
+
+  function drawOne() {
+    if (game.drawPile.length === 0) {
+      // Reshuffle discard minus top
+      if (game.discardPile.length <= 1) {
+        game.drawPile = buildUnoDeck();
+      } else {
+        const top = game.discardPile.pop();
+        const reshuffle = game.discardPile;
+        game.discardPile = [top];
+        for (let i = reshuffle.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [reshuffle[i], reshuffle[j]] = [reshuffle[j], reshuffle[i]];
+        }
+        game.drawPile = reshuffle;
+      }
+    }
+    return game.drawPile.pop();
+  }
+
+  function drawMany(player, count) {
+    for (let i = 0; i < count; i++) player.hand.push(drawOne());
+  }
+
+  function isPlayable(card) {
+    if (game.pendingDraw > 0) {
+      // Only +2 or +4 can be played to stack
+      return card.value === '+2' || card.value === 'wild+4';
+    }
+    if (card.color === 'W') return true;
+    if (card.color === game.activeColor) return true;
+    if (game.discardTop && card.value === game.discardTop.value) return true;
+    return false;
+  }
+
+  function advanceTurn(steps = 1) {
+    if (game.order.length === 0) { game.currentTurnIdx = -1; return; }
+    let idx = game.currentTurnIdx;
+    for (let s = 0; s < steps; s++) {
+      idx = (idx + game.direction + game.order.length) % game.order.length;
+    }
+    game.currentTurnIdx = idx;
+  }
+
+  function startRound() {
+    if (game.order.length < MIN_PLAYERS) {
+      game.phase = 'waiting';
+      clearTimer();
+      broadcast();
+      return;
+    }
+    game.phase = 'playing';
+    game.drawPile = buildUnoDeck();
+    game.discardPile = [];
+    game.direction = 1;
+    game.pendingDraw = 0;
+    game.winnerId = null;
+    game.lastPlayerToReduce = null;
+    for (const id of game.order) {
+      const p = game.players.get(id);
+      p.hand = [];
+      p.saidUno = false;
+      drawMany(p, INITIAL_HAND);
+    }
+    // Flip first discard; reshuffle if it's wild+4
+    let first;
+    do {
+      first = drawOne();
+      if (first.value === 'wild+4') {
+        game.drawPile.unshift(first);
+        // shuffle to bury it
+        for (let i = game.drawPile.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [game.drawPile[i], game.drawPile[j]] = [game.drawPile[j], game.drawPile[i]];
+        }
+        first = null;
+      }
+    } while (!first);
+    game.discardPile.push(first);
+    game.discardTop = first;
+    game.activeColor = first.color === 'W' ? COLORS[Math.floor(Math.random() * 4)] : first.color;
+    game.currentTurnIdx = 0;
+    log(`Nueva ronda. Carta inicial: ${cardLabel(first)}. Color: ${colorName(game.activeColor)}.`);
+
+    // Apply first-card effect
+    if (first.value === 'skip') { log(`${game.players.get(game.order[0]).name} pierde el turno.`); advanceTurn(1); }
+    else if (first.value === 'reverse') {
+      game.direction = -1;
+      if (game.order.length === 2) advanceTurn(1); // in 2-player reverse acts like skip
+      else { game.currentTurnIdx = game.order.length - 1; }
+    } else if (first.value === '+2') {
+      const victim = game.players.get(game.order[0]);
+      drawMany(victim, 2);
+      log(`${victim.name} roba 2 (carta inicial).`);
+      advanceTurn(1);
+    } else if (first.value === 'wild') {
+      // Random color already chosen; just leave
+    }
+    setTurnTimer();
+    emitAllHands();
+    broadcast();
+  }
+
+  function handleTurnTimeout() {
+    const id = currentPlayerId();
+    if (!id) return;
+    const p = game.players.get(id);
+    if (!p) return;
+    // Auto-draw 1 (or pendingDraw if any) and pass
+    if (game.pendingDraw > 0) {
+      drawMany(p, game.pendingDraw);
+      log(`${p.name} roba ${game.pendingDraw} (tiempo).`);
+      game.pendingDraw = 0;
+    } else {
+      drawMany(p, 1);
+      log(`${p.name} roba 1 y pasa (tiempo).`);
+    }
+    p.saidUno = false;
+    emitHand(id);
+    advanceTurn(1);
+    setTurnTimer();
+    broadcast();
+  }
+
+  function cardLabel(card) {
+    if (!card) return '?';
+    const c = card.color === 'W' ? 'Wild' : colorName(card.color);
+    return `${c} ${card.value}`;
+  }
+  function colorName(c) {
+    return ({ R: 'Rojo', Y: 'Amarillo', G: 'Verde', B: 'Azul' })[c] || '?';
+  }
+
+  function findBySession(sessionId) {
+    if (!sessionId || typeof sessionId !== 'string') return null;
+    for (const [key, p] of game.players) if (p.sessionId === sessionId) return { key, player: p };
+    return null;
+  }
+
+  function cleanName(raw) {
+    if (typeof raw !== 'string') return '';
+    let s = raw.trim().slice(0, 16);
+    if (!s || s === '[object Object]' || /^\[object\s/i.test(s)) return '';
+    return s;
+  }
+
+  function reattachSession(sessionId, socket, isHost, freshName) {
+    const found = findBySession(sessionId);
+    if (!found) return null;
+    const { key: oldKey, player } = found;
+    if (oldKey !== socket.id) {
+      game.players.delete(oldKey);
+      game.players.set(socket.id, player);
+      const idx = game.order.indexOf(oldKey);
+      if (idx >= 0) game.order[idx] = socket.id;
+    }
+    if (player.gracePurgeTimer) { clearTimeout(player.gracePurgeTimer); player.gracePurgeTimer = null; }
+    player.connected = true;
+    player.isHost = isHost;
+    const cleanedFresh = cleanName(freshName);
+    if (!cleanName(player.name) && cleanedFresh) player.name = cleanedFresh;
+    return player;
+  }
+
+  function purgePlayer(socketId) {
+    const p = game.players.get(socketId);
+    if (!p || p.connected) return;
+    log(`${p.name} dejó la mesa.`);
+    const idx = game.order.indexOf(socketId);
+    game.order = game.order.filter((id) => id !== socketId);
+    game.players.delete(socketId);
+    if (game.order.length === 0) {
+      game.phase = 'waiting'; game.currentTurnIdx = -1; clearTimer(); broadcast(); return;
+    }
+    if (game.order.length < MIN_PLAYERS && game.phase === 'playing') {
+      // Last remaining wins
+      const winner = game.players.get(game.order[0]);
+      game.winnerId = game.order[0];
+      game.phase = 'roundOver';
+      clearTimer();
+      log(`${winner.name} gana por abandono.`);
+      broadcast();
+      setTimeout(() => { startRound(); }, 6000);
+      return;
+    }
+    if (idx >= 0 && game.currentTurnIdx >= game.order.length) game.currentTurnIdx = 0;
+    if (idx >= 0 && idx < game.currentTurnIdx) game.currentTurnIdx--;
+    broadcast();
+  }
+
+  function applyCardEffect(card, playerId, options) {
+    // After a card lands, apply its effect and decide who plays next.
+    // Returns nothing; mutates game state.
+    const playerIdx = game.order.indexOf(playerId);
+    if (playerIdx < 0) return;
+
+    if (card.color === 'W') {
+      const chosen = options && COLORS.includes(options.chosenColor) ? options.chosenColor : COLORS[0];
+      game.activeColor = chosen;
+    } else {
+      game.activeColor = card.color;
+    }
+
+    if (card.value === '+2') {
+      game.pendingDraw += 2;
+      // Next player must respond
+      game.currentTurnIdx = playerIdx;
+      advanceTurn(1);
+      return;
+    }
+    if (card.value === 'wild+4') {
+      game.pendingDraw += 4;
+      game.currentTurnIdx = playerIdx;
+      advanceTurn(1);
+      return;
+    }
+    if (card.value === 'skip') {
+      game.currentTurnIdx = playerIdx;
+      advanceTurn(2);
+      return;
+    }
+    if (card.value === 'reverse') {
+      game.direction *= -1;
+      if (game.order.length === 2) {
+        // Acts like skip
+        game.currentTurnIdx = playerIdx;
+        advanceTurn(2);
+      } else {
+        game.currentTurnIdx = playerIdx;
+        advanceTurn(1);
+      }
+      return;
+    }
+    if (card.value === 7) {
+      const targetId = options && options.swapTargetId;
+      if (targetId && targetId !== playerId && game.players.has(targetId)) {
+        const a = game.players.get(playerId);
+        const b = game.players.get(targetId);
+        const tmp = a.hand; a.hand = b.hand; b.hand = tmp;
+        const tmpUno = a.saidUno; a.saidUno = b.saidUno; b.saidUno = tmpUno;
+        log(`${a.name} intercambia mano con ${b.name}.`);
+        emitHand(playerId); emitHand(targetId);
+      }
+      game.currentTurnIdx = playerIdx;
+      advanceTurn(1);
+      return;
+    }
+    if (card.value === 0) {
+      // Rotate all hands in current direction
+      if (game.order.length >= 2) {
+        const hands = game.order.map((id) => game.players.get(id).hand);
+        const unos = game.order.map((id) => game.players.get(id).saidUno);
+        const n = game.order.length;
+        for (let i = 0; i < n; i++) {
+          const src = (i - game.direction + n) % n;
+          const targetId = game.order[i];
+          game.players.get(targetId).hand = hands[src];
+          game.players.get(targetId).saidUno = unos[src];
+        }
+        log(`Rotación de manos (0).`);
+        emitAllHands();
+      }
+      game.currentTurnIdx = playerIdx;
+      advanceTurn(1);
+      return;
+    }
+    // Plain number card
+    game.currentTurnIdx = playerIdx;
+    advanceTurn(1);
+  }
+
+  nsp.on('connection', (socket) => {
+    const isHost = isLocalhostAddr(socket.handshake.address);
+    socket.data.isHost = isHost;
+    socket.emit('hello', { isHost });
+    socket.emit('state', publicState());
+
+    socket.on('join', (payload) => {
+      const rawName = typeof payload === 'string' ? payload : payload?.name;
+      const sessionId = typeof payload === 'object' && payload ? payload.sessionId : null;
+
+      if (sessionId) {
+        const player = reattachSession(sessionId, socket, isHost, rawName);
+        if (player) {
+          socket.data.isHost = isHost;
+          socket.emit('joined', { id: socket.id, sessionId: player.sessionId, name: player.name, isHost });
+          log(`${player.name} se reconectó.`);
+          emitHand(socket.id);
+          broadcast();
+          return;
+        }
+      }
+
+      if (game.players.has(socket.id)) return;
+      const name = cleanName(rawName) || `Jugador ${game.order.length + 1}`;
+      if (game.order.length >= MAX_SEATS) { socket.emit('error_msg', `Mesa llena (máx ${MAX_SEATS}).`); return; }
+      if (game.phase === 'playing') { socket.emit('error_msg', 'Hay una ronda en curso; espera al final.'); return; }
+      const newSessionId = crypto.randomUUID();
+      game.players.set(socket.id, {
+        sessionId: newSessionId, name, hand: [], saidUno: false,
+        connected: true, isHost, gracePurgeTimer: null,
+      });
+      game.order.push(socket.id);
+      log(`${name} se sentó${isHost ? ' (HOST ★)' : ''}.`);
+      socket.emit('joined', { id: socket.id, sessionId: newSessionId, name, isHost });
+      if (game.phase === 'waiting' && game.order.length >= MIN_PLAYERS) {
+        setTimeout(() => { if (game.phase === 'waiting') startRound(); }, 1500);
+      }
+      broadcast();
+    });
+
+    socket.on('playCard', (data) => {
+      if (game.phase !== 'playing') return;
+      if (currentPlayerId() !== socket.id) { socket.emit('error_msg', 'No es tu turno.'); return; }
+      const p = game.players.get(socket.id); if (!p) return;
+      const idx = Number(data?.cardIdx);
+      if (!Number.isInteger(idx) || idx < 0 || idx >= p.hand.length) { socket.emit('error_msg', 'Carta inválida.'); return; }
+      const card = p.hand[idx];
+      if (!isPlayable(card)) { socket.emit('error_msg', 'No puedes jugar esa carta ahora.'); return; }
+      if ((card.value === 7) && (!data?.swapTargetId || !game.players.has(data.swapTargetId) || data.swapTargetId === socket.id)) {
+        socket.emit('error_msg', 'Elige un jugador para intercambiar.'); return;
+      }
+      if (card.color === 'W' && !COLORS.includes(data?.chosenColor)) {
+        socket.emit('error_msg', 'Elige un color.'); return;
+      }
+      // Penultimate-card UNO check happens BEFORE removing the card (count is about to drop)
+      const willHaveOne = p.hand.length === 2;
+      // Remove card
+      p.hand.splice(idx, 1);
+      game.discardPile.push(card);
+      game.discardTop = card;
+      log(`${p.name} juega ${cardLabel(card)}.`);
+      if (willHaveOne) {
+        game.lastPlayerToReduce = socket.id;
+        // If they didn't already press UNO, they're vulnerable to Catch
+        // saidUno can be set in advance OR right after; we leave it false here
+      }
+      if (p.hand.length === 0) {
+        // Winner!
+        game.winnerId = socket.id;
+        game.phase = 'roundOver';
+        clearTimer();
+        log(`🏆 ${p.name} GANA la ronda.`);
+        emitAllHands();
+        broadcast();
+        setTimeout(() => { startRound(); }, 8000);
+        return;
+      }
+      applyCardEffect(card, socket.id, data || {});
+      // Reset saidUno for anyone other than the player who just played to 1
+      for (const id of game.order) {
+        const pp = game.players.get(id);
+        if (pp.hand.length !== 1) pp.saidUno = false;
+      }
+      emitHand(socket.id);
+      // Hands may have shuffled (0/7), re-emit
+      if (card.value === 0 || card.value === 7) emitAllHands();
+      setTurnTimer();
+      broadcast();
+    });
+
+    socket.on('drawCard', () => {
+      if (game.phase !== 'playing') return;
+      if (currentPlayerId() !== socket.id) { socket.emit('error_msg', 'No es tu turno.'); return; }
+      const p = game.players.get(socket.id); if (!p) return;
+      if (game.pendingDraw > 0) {
+        drawMany(p, game.pendingDraw);
+        log(`${p.name} roba ${game.pendingDraw}.`);
+        game.pendingDraw = 0;
+        p.saidUno = false;
+        emitHand(socket.id);
+        advanceTurn(1);
+        setTurnTimer();
+        broadcast();
+        return;
+      }
+      drawMany(p, 1);
+      log(`${p.name} roba 1.`);
+      emitHand(socket.id);
+      // Player may now play the drawn card if playable, OR pass.
+      // We let client decide via 'playCard' (still their turn) or 'pass'.
+      broadcast();
+    });
+
+    socket.on('pass', () => {
+      if (game.phase !== 'playing') return;
+      if (currentPlayerId() !== socket.id) return;
+      const p = game.players.get(socket.id); if (!p) return;
+      p.saidUno = false;
+      log(`${p.name} pasa.`);
+      advanceTurn(1);
+      setTurnTimer();
+      broadcast();
+    });
+
+    socket.on('sayUno', () => {
+      const p = game.players.get(socket.id); if (!p) return;
+      // Valid when about to play penultimate (count == 2) OR right after (count == 1)
+      if (p.hand.length === 1 || p.hand.length === 2) {
+        p.saidUno = true;
+        log(`${p.name}: ¡UNO!`);
+        broadcast();
+      }
+    });
+
+    socket.on('catchUno', (data) => {
+      if (game.phase !== 'playing') return;
+      const targetId = data?.playerId;
+      if (!targetId || !game.players.has(targetId)) return;
+      if (targetId === socket.id) return;
+      const target = game.players.get(targetId);
+      if (target.hand.length === 1 && !target.saidUno && game.lastPlayerToReduce === targetId) {
+        drawMany(target, 2);
+        target.saidUno = false; // they now have 3, no longer at uno
+        game.lastPlayerToReduce = null;
+        log(`¡Caught! ${target.name} no dijo UNO y roba 2.`);
+        emitHand(targetId);
+        broadcast();
+      }
+    });
+
+    socket.on('jumpIn', (data) => {
+      if (game.phase !== 'playing') return;
+      if (game.pendingDraw > 0) { socket.emit('error_msg', 'No se puede jump-in con cartas pendientes.'); return; }
+      const p = game.players.get(socket.id); if (!p) return;
+      if (currentPlayerId() === socket.id) { socket.emit('error_msg', 'Ya es tu turno.'); return; }
+      const idx = Number(data?.cardIdx);
+      if (!Number.isInteger(idx) || idx < 0 || idx >= p.hand.length) return;
+      const card = p.hand[idx];
+      if (card.color === 'W') { socket.emit('error_msg', 'No puedes hacer jump-in con Wild.'); return; }
+      if (!game.discardTop) return;
+      if (card.color !== game.discardTop.color || card.value !== game.discardTop.value) {
+        socket.emit('error_msg', 'Solo carta idéntica.'); return;
+      }
+      const willHaveOne = p.hand.length === 2;
+      p.hand.splice(idx, 1);
+      game.discardPile.push(card);
+      game.discardTop = card;
+      log(`${p.name} hace JUMP-IN con ${cardLabel(card)}.`);
+      if (willHaveOne) game.lastPlayerToReduce = socket.id;
+      if (p.hand.length === 0) {
+        game.winnerId = socket.id;
+        game.phase = 'roundOver';
+        clearTimer();
+        log(`🏆 ${p.name} GANA la ronda.`);
+        emitAllHands();
+        broadcast();
+        setTimeout(() => { startRound(); }, 8000);
+        return;
+      }
+      // Move turn to the jumper, then apply effect
+      game.currentTurnIdx = game.order.indexOf(socket.id);
+      applyCardEffect(card, socket.id, {});
+      for (const id of game.order) {
+        const pp = game.players.get(id);
+        if (pp.hand.length !== 1) pp.saidUno = false;
+      }
+      emitHand(socket.id);
+      setTurnTimer();
+      broadcast();
+    });
+
+    socket.on('host_force_start', () => {
+      if (!socket.data.isHost) return;
+      if (game.phase === 'waiting' && game.order.length >= MIN_PLAYERS) startRound();
+    });
+
+    socket.on('disconnect', () => {
+      const p = game.players.get(socket.id); if (!p) return;
+      p.connected = false;
+      log(`${p.name} se desconectó (sesión guardada).`);
+      if (p.gracePurgeTimer) clearTimeout(p.gracePurgeTimer);
+      p.gracePurgeTimer = setTimeout(() => purgePlayer(socket.id), SESSION_GRACE_MS);
+      // If it was their turn, auto-pass
+      if (game.phase === 'playing' && currentPlayerId() === socket.id) {
+        if (game.pendingDraw > 0) {
+          drawMany(p, game.pendingDraw);
+          game.pendingDraw = 0;
+        } else {
+          drawMany(p, 1);
+        }
+        advanceTurn(1);
+        setTurnTimer();
+      }
+      broadcast();
+    });
+  });
+}
+
+// ============================================================
 // Boot
 // ============================================================
 function getLanIps() {
@@ -1084,5 +1665,5 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n♠♥♦♣ Casino LAN en puerto ${PORT}`);
   console.log(`HOST:  http://localhost:${PORT}  (rebuys)`);
   for (const ip of getLanIps()) console.log(`LAN:   http://${ip}:${PORT}`);
-  console.log('Rutas: /  /blackjack  /poker\n');
+  console.log('Rutas: /  /blackjack  /poker  /uno\n');
 });
