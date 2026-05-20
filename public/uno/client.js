@@ -18,6 +18,7 @@ const myNameEl = $('myName');
 const myCountEl = $('myCount');
 const unoBtn = $('unoBtn');
 const passBtn = $('passBtn');
+const startBtn = $('startBtn');
 const logEl = $('log');
 const colorPicker = $('colorPicker');
 const colorCancel = $('colorCancel');
@@ -238,6 +239,10 @@ function render() {
   if (myTurn && state.phase === 'playing') passBtn.classList.remove('hidden');
   else passBtn.classList.add('hidden');
 
+  // Start button (lobby host only, during waiting phase)
+  if (state.phase === 'waiting' && state.lobbyHostId === myId) startBtn.classList.remove('hidden');
+  else startBtn.classList.add('hidden');
+
   // Winner banner
   if (state.phase === 'roundOver' && state.winnerId) {
     const w = state.players.find((p) => p.id === state.winnerId);
@@ -333,6 +338,7 @@ drawPileEl.addEventListener('click', () => {
 });
 unoBtn.addEventListener('click', () => { socket.emit('sayUno'); });
 passBtn.addEventListener('click', () => { socket.emit('pass'); });
+startBtn.addEventListener('click', () => { socket.emit('startGame'); });
 
 // ====== Join flow ======
 joinBtn.addEventListener('click', tryJoin);

@@ -612,6 +612,19 @@ function renderControls(state) {
     return;
   }
 
+  if (state.phase === "waiting") {
+    if (state.lobbyHostId === myId) {
+      controlsEl.innerHTML = `<span class="bet-info">Fichas: <strong>${me.chips}</strong>${CHIP_ICO}</span>`;
+      const btn = document.createElement("button");
+      btn.className = "btn-success";
+      btn.textContent = "▶ Iniciar partida";
+      btn.onclick = () => socket.emit("startGame");
+      controlsEl.prepend(btn);
+    } else {
+      controlsEl.innerHTML = `<span class="bet-info">Esperando que el anfitrión inicie… · Fichas: <strong>${me.chips}</strong>${CHIP_ICO}</span>`;
+    }
+    return;
+  }
   let info;
   if (state.phase === "playing") info = "Esperando turno…";
   else if (state.phase === "dealer") info = "El crupier juega…";

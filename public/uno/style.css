@@ -503,6 +503,13 @@ body {
   color: var(--text);
 }
 .pass-btn:hover { background: var(--panel); }
+.start-btn {
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  color: #fff;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+.start-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(34,197,94,0.5); }
 
 .my-info {
   display: flex;

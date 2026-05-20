@@ -426,6 +426,20 @@ function renderControls(state) {
     controlsEl.innerHTML = `<span class="info-line">Únete para jugar.</span>`;
     return;
   }
+  if (state.phase === 'waiting') {
+    if (state.lobbyHostId === myId) {
+      controlsEl.innerHTML = `<span class="info-line">Fichas: <strong>${me.chips}</strong>${CHIP_ICO}</span>`;
+      const btn = document.createElement('button');
+      btn.className = 'btn-glass btn-success';
+      btn.type = 'button';
+      btn.textContent = '▶ Iniciar partida';
+      btn.onclick = () => socket.emit('startGame');
+      controlsEl.prepend(btn);
+    } else {
+      controlsEl.innerHTML = `<span class="info-line">Esperando que el anfitrión inicie… · Fichas: <strong>${me.chips}</strong>${CHIP_ICO}</span>`;
+    }
+    return;
+  }
   if (me.chips <= 0 && state.phase !== 'showdown') {
     controlsEl.innerHTML = `<span class="info-line danger">Sin fichas. ${isHost ? 'Eres HOST — usa el botón.' : 'Pide al HOST que te dé fichas.'}</span>`;
     if (isHost) {

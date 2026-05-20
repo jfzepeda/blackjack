@@ -128,6 +128,7 @@ function setupBlackjack(nsp) {
       phase: game.phase, players,
       dealer: { hand: dealerHand, total: dealerTotal, hideHole: game.dealer.hideHole },
       currentTurn: curId, phaseEndsAt: game.phaseEndsAt, minBet: MIN_BET,
+      lobbyHostId: game.order[0] || null,
     };
   }
   function broadcast() { nsp.emit('state', publicState()); }
@@ -365,7 +366,7 @@ function setupBlackjack(nsp) {
       game.order.push(socket.id);
       log(`${name} se sentó${isHost ? ' (HOST ★)' : ''}.`);
       socket.emit('joined', { id: socket.id, sessionId: newSessionId, name, isHost });
-      if (game.phase === 'waiting') startBetting(); else broadcast();
+      broadcast();
     });
 
     socket.on('request_rebuy', () => {
@@ -400,6 +401,12 @@ function setupBlackjack(nsp) {
     socket.on('double',    () => doAction(socket, 'double'));
     socket.on('split',     () => doAction(socket, 'split'));
     socket.on('surrender', () => doAction(socket, 'surrender'));
+
+    socket.on('startGame', () => {
+      if (game.phase !== 'waiting') return;
+      if (game.order[0] !== socket.id) return;
+      startBetting();
+    });
 
     socket.on('host_rebuy', (targetId) => {
       if (!socket.data.isHost) { socket.emit('error_msg', 'Solo el HOST puede dar fichas.'); return; }
@@ -592,7 +599,6 @@ function setupPoker(nsp) {
     deck: [],
     phaseEndsAt: 0,
     timer: null,
-    startCountdown: null,
   };
 
   function clearTimer() { if (game.timer) { clearTimeout(game.timer); game.timer = null; } }
@@ -643,6 +649,7 @@ function setupPoker(nsp) {
       bigBlind: BIG_BLIND,
       currentTurn: curId,
       phaseEndsAt: game.phaseEndsAt,
+      lobbyHostId: game.order[0] || null,
     };
   }
 
@@ -989,17 +996,6 @@ function setupPoker(nsp) {
       game.order.push(socket.id);
       log(`${name} se sentó${isHost ? ' (HOST ★)' : ''}.`);
       socket.emit('joined', { id: socket.id, name, isHost });
-      if (game.phase === 'waiting') {
-        if (game.order.filter((id) => game.players.get(id).chips > 0).length >= 2) {
-          if (!game.startCountdown) {
-            log('Empezando en 4s…');
-            game.startCountdown = setTimeout(() => {
-              game.startCountdown = null;
-              tryStartHand();
-            }, 4000);
-          }
-        }
-      }
       broadcast();
     });
 
@@ -1009,18 +1005,18 @@ function setupPoker(nsp) {
     socket.on('raise', (amt) => doAction(socket, 'raise', amt));
     socket.on('allin', () => doAction(socket, 'allin'));
 
+    socket.on('startGame', () => {
+      if (game.phase !== 'waiting') return;
+      if (game.order[0] !== socket.id) return;
+      tryStartHand();
+    });
+
     socket.on('host_rebuy', (targetId) => {
       if (!socket.data.isHost) { socket.emit('error_msg', 'Solo el HOST puede dar fichas.'); return; }
       const p = game.players.get(targetId); if (!p) return;
       p.chips += REBUY_AMOUNT;
       log(`HOST le dio ${REBUY_AMOUNT} a ${p.name}.`);
       broadcast();
-      // Maybe trigger a hand start if we now have 2 with chips
-      if (game.phase === 'waiting' && !game.startCountdown) {
-        if (game.order.filter((id) => game.players.get(id).chips > 0).length >= 2) {
-          game.startCountdown = setTimeout(() => { game.startCountdown = null; tryStartHand(); }, 2000);
-        }
-      }
     });
 
     socket.on('disconnect', () => {
@@ -1151,6 +1147,7 @@ function setupUno(nsp) {
       winnerId: game.winnerId,
       minPlayers: MIN_PLAYERS,
       maxSeats: MAX_SEATS,
+      lobbyHostId: game.order[0] || null,
     };
   }
 
@@ -1462,9 +1459,6 @@ function setupUno(nsp) {
       game.order.push(socket.id);
       log(`${name} se sentó${isHost ? ' (HOST ★)' : ''}.`);
       socket.emit('joined', { id: socket.id, sessionId: newSessionId, name, isHost });
-      if (game.phase === 'waiting' && game.order.length >= MIN_PLAYERS) {
-        setTimeout(() => { if (game.phase === 'waiting') startRound(); }, 1500);
-      }
       broadcast();
     });
 
@@ -1617,6 +1611,13 @@ function setupUno(nsp) {
       emitHand(socket.id);
       setTurnTimer();
       broadcast();
+    });
+
+    socket.on('startGame', () => {
+      if (game.phase !== 'waiting') return;
+      if (game.order[0] !== socket.id) return;
+      if (game.order.length < MIN_PLAYERS) { socket.emit('error_msg', `Se necesitan al menos ${MIN_PLAYERS} jugadores.`); return; }
+      startRound();
     });
 
     socket.on('host_force_start', () => {
