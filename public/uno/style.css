@@ -682,3 +682,65 @@ body {
   .uno-card .glyph { font-size: 26px; }
   .uno-card.in-hand { margin-left: -28px; }
 }
+
+/* ============================================================
+   Start-game overlay (waiting room)
+   ============================================================ */
+.start-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: radial-gradient(ellipse at center, rgba(15, 16, 20, 0.72) 0%, rgba(15, 16, 20, 0.92) 70%);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: inherit;
+  z-index: 4;
+  padding: 24px;
+  text-align: center;
+}
+.start-overlay-title {
+  font-family: 'Poppins', system-ui, sans-serif;
+  font-weight: 800;
+  font-size: 22px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text);
+}
+.start-overlay-sub {
+  font-size: 14px;
+  color: var(--text-dim);
+  max-width: 320px;
+}
+.start-game-btn {
+  appearance: none;
+  cursor: pointer;
+  margin-top: 6px;
+  padding: 14px 28px;
+  font-family: 'Poppins', system-ui, sans-serif;
+  font-weight: 800;
+  font-size: 16px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #fff;
+  background: linear-gradient(135deg, var(--uno-red) 0%, #b71419 100%);
+  border: none;
+  border-radius: 999px;
+  box-shadow: 0 8px 22px rgba(237, 28, 36, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
+}
+.start-game-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  filter: brightness(1.08);
+  box-shadow: 0 12px 28px rgba(237, 28, 36, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+.start-game-btn:active:not(:disabled) { transform: translateY(0); }
+.start-game-btn:disabled {
+  background: linear-gradient(135deg, #4a4d56, #2d2f36);
+  color: var(--text-dim);
+  box-shadow: none;
+  cursor: not-allowed;
+}

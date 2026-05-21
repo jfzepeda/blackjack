@@ -26,6 +26,9 @@ const swapOptionsEl = $('swapOptions');
 const swapCancel = $('swapCancel');
 const winnerBanner = $('winnerBanner');
 const winnerNameEl = $('winnerName');
+const startOverlay = $('startOverlay');
+const startOverlaySub = $('startOverlaySub');
+const startGameBtn = $('startGameBtn');
 
 // ====== Session / cookies ======
 const SESSION_COOKIE = 'uno_session';
@@ -246,7 +249,40 @@ function render() {
   } else {
     winnerBanner.classList.add('hidden');
   }
+
+  // Start-game overlay (waiting phase)
+  if (state.phase === 'waiting' && myId) {
+    const seated = state.players.length;
+    const min = state.minPlayers || 2;
+    const enough = seated >= min;
+    startOverlay.classList.remove('hidden');
+    if (isHost) {
+      if (enough) {
+        startOverlaySub.textContent = `${seated} jugadores listos`;
+        startGameBtn.classList.remove('hidden');
+        startGameBtn.disabled = false;
+      } else {
+        startOverlaySub.textContent = `Esperando jugadores (${seated}/${min})…`;
+        startGameBtn.classList.remove('hidden');
+        startGameBtn.disabled = true;
+      }
+    } else {
+      const hostP = state.players.find((p) => p.isHost);
+      startOverlaySub.textContent = hostP
+        ? `Esperando que ${hostP.name} inicie la partida…`
+        : `Esperando al host…`;
+      startGameBtn.classList.add('hidden');
+    }
+  } else {
+    startOverlay.classList.add('hidden');
+    startGameBtn.classList.add('hidden');
+  }
 }
+
+startGameBtn.addEventListener('click', () => {
+  if (!isHost) return;
+  socket.emit('host_force_start');
+});
 
 // ====== Card click ======
 function onHandCardClick(idx) {

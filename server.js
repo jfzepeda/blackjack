@@ -1315,22 +1315,39 @@ function setupUno(nsp) {
     }
     if (player.gracePurgeTimer) { clearTimeout(player.gracePurgeTimer); player.gracePurgeTimer = null; }
     player.connected = true;
-    player.isHost = isHost;
+    // preserve player.isHost across reconnects
     const cleanedFresh = cleanName(freshName);
     if (!cleanName(player.name) && cleanedFresh) player.name = cleanedFresh;
     return player;
+  }
+
+  function promoteHostIfNeeded() {
+    if (game.order.length === 0) return;
+    const hasHost = game.order.some((id) => game.players.get(id)?.isHost);
+    if (!hasHost) {
+      const newHostId = game.order[0];
+      const newHost = game.players.get(newHostId);
+      if (newHost) {
+        newHost.isHost = true;
+        const s = nsp.sockets.get(newHostId);
+        if (s) { s.data.isHost = true; s.emit('hello', { isHost: true }); }
+        log(`${newHost.name} es el nuevo HOST ★.`);
+      }
+    }
   }
 
   function purgePlayer(socketId) {
     const p = game.players.get(socketId);
     if (!p || p.connected) return;
     log(`${p.name} dejó la mesa.`);
+    const wasHost = p.isHost;
     const idx = game.order.indexOf(socketId);
     game.order = game.order.filter((id) => id !== socketId);
     game.players.delete(socketId);
     if (game.order.length === 0) {
       game.phase = 'waiting'; game.currentTurnIdx = -1; clearTimer(); broadcast(); return;
     }
+    if (wasHost) promoteHostIfNeeded();
     if (game.order.length < MIN_PLAYERS && game.phase === 'playing') {
       // Last remaining wins
       const winner = game.players.get(game.order[0]);
@@ -1339,7 +1356,13 @@ function setupUno(nsp) {
       clearTimer();
       log(`${winner.name} gana por abandono.`);
       broadcast();
-      setTimeout(() => { startRound(); }, 6000);
+      setTimeout(() => {
+        game.phase = 'waiting';
+        game.currentTurnIdx = -1;
+        game.turnEndsAt = 0;
+        clearTimer();
+        broadcast();
+      }, 6000);
       return;
     }
     if (idx >= 0 && game.currentTurnIdx >= game.order.length) game.currentTurnIdx = 0;
@@ -1429,9 +1452,8 @@ function setupUno(nsp) {
   }
 
   nsp.on('connection', (socket) => {
-    const isHost = isLocalhostAddr(socket.handshake.address);
-    socket.data.isHost = isHost;
-    socket.emit('hello', { isHost });
+    socket.data.isHost = false;
+    socket.emit('hello', { isHost: false });
     socket.emit('state', publicState());
 
     socket.on('join', (payload) => {
@@ -1439,10 +1461,10 @@ function setupUno(nsp) {
       const sessionId = typeof payload === 'object' && payload ? payload.sessionId : null;
 
       if (sessionId) {
-        const player = reattachSession(sessionId, socket, isHost, rawName);
+        const player = reattachSession(sessionId, socket, false, rawName);
         if (player) {
-          socket.data.isHost = isHost;
-          socket.emit('joined', { id: socket.id, sessionId: player.sessionId, name: player.name, isHost });
+          socket.data.isHost = !!player.isHost;
+          socket.emit('joined', { id: socket.id, sessionId: player.sessionId, name: player.name, isHost: !!player.isHost });
           log(`${player.name} se reconectó.`);
           emitHand(socket.id);
           broadcast();
@@ -1454,17 +1476,17 @@ function setupUno(nsp) {
       const name = cleanName(rawName) || `Jugador ${game.order.length + 1}`;
       if (game.order.length >= MAX_SEATS) { socket.emit('error_msg', `Mesa llena (máx ${MAX_SEATS}).`); return; }
       if (game.phase === 'playing') { socket.emit('error_msg', 'Hay una ronda en curso; espera al final.'); return; }
+      const hasHost = game.order.some((id) => game.players.get(id)?.isHost);
+      const isHost = !hasHost; // first player to sit becomes host
       const newSessionId = crypto.randomUUID();
       game.players.set(socket.id, {
         sessionId: newSessionId, name, hand: [], saidUno: false,
         connected: true, isHost, gracePurgeTimer: null,
       });
       game.order.push(socket.id);
+      socket.data.isHost = isHost;
       log(`${name} se sentó${isHost ? ' (HOST ★)' : ''}.`);
       socket.emit('joined', { id: socket.id, sessionId: newSessionId, name, isHost });
-      if (game.phase === 'waiting' && game.order.length >= MIN_PLAYERS) {
-        setTimeout(() => { if (game.phase === 'waiting') startRound(); }, 1500);
-      }
       broadcast();
     });
 
@@ -1502,7 +1524,14 @@ function setupUno(nsp) {
         log(`🏆 ${p.name} GANA la ronda.`);
         emitAllHands();
         broadcast();
-        setTimeout(() => { startRound(); }, 8000);
+        setTimeout(() => {
+          game.phase = 'waiting';
+          game.currentTurnIdx = -1;
+          game.turnEndsAt = 0;
+          game.winnerId = null;
+          clearTimer();
+          broadcast();
+        }, 8000);
         return;
       }
       applyCardEffect(card, socket.id, data || {});
@@ -1604,7 +1633,14 @@ function setupUno(nsp) {
         log(`🏆 ${p.name} GANA la ronda.`);
         emitAllHands();
         broadcast();
-        setTimeout(() => { startRound(); }, 8000);
+        setTimeout(() => {
+          game.phase = 'waiting';
+          game.currentTurnIdx = -1;
+          game.turnEndsAt = 0;
+          game.winnerId = null;
+          clearTimer();
+          broadcast();
+        }, 8000);
         return;
       }
       // Move turn to the jumper, then apply effect
