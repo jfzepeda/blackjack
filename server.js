@@ -41,6 +41,14 @@ function isLocalhostAddr(addr) {
   return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
 }
 
+const ROOM_ID_RE = /^[A-Za-z0-9_-]{1,16}$/;
+const DEFAULT_ROOM = 'lobby';
+const MAX_ROOMS_PER_NAMESPACE = 100;
+function sanitizeRoomId(raw) {
+  const s = typeof raw === 'string' ? raw.trim() : '';
+  return ROOM_ID_RE.test(s) ? s : DEFAULT_ROOM;
+}
+
 // ============================================================
 // BLACKJACK (namespace /blackjack)
 // ============================================================
@@ -79,6 +87,35 @@ function setupBlackjack(nsp) {
     return cards.length === 2 && handTotal(cards) === 21;
   }
 
+  function cleanName(raw) {
+    if (typeof raw !== 'string') return '';
+    let s = raw.trim().slice(0, 16);
+    if (!s || s === '[object Object]' || /^\[object\s/i.test(s)) return '';
+    return s;
+  }
+
+  const rooms = new Map();
+
+  function getOrCreateRoom(roomId) {
+    let r = rooms.get(roomId);
+    if (!r) {
+      if (rooms.size >= MAX_ROOMS_PER_NAMESPACE) return null;
+      r = createRoom(roomId);
+      rooms.set(roomId, r);
+    }
+    return r;
+  }
+
+  function destroyIfEmpty(roomId) {
+    const r = rooms.get(roomId);
+    if (!r) return;
+    if (r.game.players.size === 0) {
+      r.clearTimer();
+      rooms.delete(roomId);
+    }
+  }
+
+  function createRoom(roomId) {
   const game = {
     phase: 'waiting',
     players: new Map(),
@@ -130,8 +167,8 @@ function setupBlackjack(nsp) {
       currentTurn: curId, phaseEndsAt: game.phaseEndsAt, minBet: MIN_BET,
     };
   }
-  function broadcast() { nsp.emit('state', publicState()); }
-  function log(msg) { nsp.emit('log', { t: Date.now(), msg }); }
+  function broadcast() { nsp.to(roomId).emit('state', publicState()); }
+  function log(msg) { nsp.to(roomId).emit('log', { t: Date.now(), msg }); }
   function clearTimer() { if (game.timer) { clearTimeout(game.timer); game.timer = null; } }
   function setPhaseTimer(ms, fn) {
     clearTimer();
@@ -289,13 +326,6 @@ function setupBlackjack(nsp) {
     return null;
   }
 
-  function cleanName(raw) {
-    if (typeof raw !== 'string') return '';
-    let s = raw.trim().slice(0, 16);
-    if (!s || s === '[object Object]' || /^\[object\s/i.test(s)) return '';
-    return s;
-  }
-
   function reattachSession(sessionId, socket, isHost, freshName) {
     const found = findBySession(sessionId);
     if (!found) return null;
@@ -323,109 +353,13 @@ function setupBlackjack(nsp) {
     game.order = game.order.filter((id) => id !== socketId);
     game.players.delete(socketId);
     if (game.order.length === 0) {
-      game.phase = 'waiting'; game.currentTurnIdx = -1; clearTimer(); broadcast(); return;
+      game.phase = 'waiting'; game.currentTurnIdx = -1; clearTimer(); broadcast();
+      destroyIfEmpty(roomId);
+      return;
     }
     if (idx >= 0 && game.currentTurnIdx > idx) game.currentTurnIdx--;
     broadcast();
   }
-
-  nsp.on('connection', (socket) => {
-    const isHost = isLocalhostAddr(socket.handshake.address);
-    socket.data.isHost = isHost;
-    socket.emit('hello', { isHost });
-    socket.emit('state', publicState());
-
-    socket.on('join', (payload) => {
-      const rawName = typeof payload === 'string' ? payload : payload?.name;
-      const sessionId = typeof payload === 'object' && payload ? payload.sessionId : null;
-
-      // Try reconnect via session token
-      if (sessionId) {
-        const player = reattachSession(sessionId, socket, isHost, rawName);
-        if (player) {
-          socket.data.isHost = isHost;
-          socket.emit('joined', { id: socket.id, sessionId: player.sessionId, name: player.name, isHost });
-          log(`${player.name} se reconectó.`);
-          broadcast();
-          return;
-        }
-      }
-
-      if (game.players.has(socket.id)) return;
-      const name = cleanName(rawName) || `Jugador ${game.order.length + 1}`;
-      if (game.order.length >= MAX_SEATS) { socket.emit('error_msg', `Mesa llena (máx ${MAX_SEATS}).`); return; }
-      const newSessionId = crypto.randomUUID();
-      game.players.set(socket.id, {
-        sessionId: newSessionId,
-        name, chips: STARTING_CHIPS, bet: 0,
-        sideBets: { under: 0, exact: 0, over: 0 }, sideResults: null, sideTotal: null,
-        hands: [], currentHandIdx: 0, status: 'idle', connected: true, isHost,
-        rebuyRequested: false, gracePurgeTimer: null,
-      });
-      game.order.push(socket.id);
-      log(`${name} se sentó${isHost ? ' (HOST ★)' : ''}.`);
-      socket.emit('joined', { id: socket.id, sessionId: newSessionId, name, isHost });
-      if (game.phase === 'waiting') startBetting(); else broadcast();
-    });
-
-    socket.on('request_rebuy', () => {
-      const p = game.players.get(socket.id); if (!p) return;
-      if (p.chips >= MIN_BET) { socket.emit('error_msg', 'Aún tienes fichas suficientes.'); return; }
-      if (p.rebuyRequested) return;
-      p.rebuyRequested = true;
-      log(`✋ ${p.name} pidió fichas al HOST.`);
-      broadcast();
-    });
-
-    socket.on('bet', (data) => {
-      if (game.phase !== 'betting') return;
-      const p = game.players.get(socket.id); if (!p) return;
-      const main  = Math.max(0, Math.floor(Number(data?.main)  || 0));
-      const under = Math.max(0, Math.floor(Number(data?.under) || 0));
-      const exact = Math.max(0, Math.floor(Number(data?.exact) || 0));
-      const over  = Math.max(0, Math.floor(Number(data?.over)  || 0));
-      if (main < MIN_BET) { socket.emit('error_msg', `Apuesta principal mínima ${MIN_BET}.`); return; }
-      const requested = main + under + exact + over;
-      const available = p.chips + p.bet + p.sideBets.under + p.sideBets.exact + p.sideBets.over;
-      if (requested > available) { socket.emit('error_msg', 'No tienes suficientes fichas.'); return; }
-      p.chips = available - requested;
-      p.bet = main;
-      p.sideBets = { under, exact, over };
-      p.status = 'betting';
-      broadcast();
-    });
-
-    socket.on('hit',       () => doAction(socket, 'hit'));
-    socket.on('stand',     () => doAction(socket, 'stand'));
-    socket.on('double',    () => doAction(socket, 'double'));
-    socket.on('split',     () => doAction(socket, 'split'));
-    socket.on('surrender', () => doAction(socket, 'surrender'));
-
-    socket.on('host_rebuy', (targetId) => {
-      if (!socket.data.isHost) { socket.emit('error_msg', 'Solo el HOST puede dar fichas.'); return; }
-      const p = game.players.get(targetId); if (!p) return;
-      p.chips += REBUY_AMOUNT;
-      p.rebuyRequested = false;
-      log(`HOST le dio ${REBUY_AMOUNT} a ${p.name}.`);
-      broadcast();
-    });
-
-    socket.on('disconnect', () => {
-      const p = game.players.get(socket.id); if (!p) return;
-      p.connected = false;
-      log(`${p.name} se desconectó (sesión guardada).`);
-      // Auto-stand any active hands so the round can continue.
-      let mustAdvance = false;
-      if (game.phase === 'playing') {
-        for (const h of p.hands) if (h.status === 'playing') h.status = 'stood';
-        if (currentPlayerId() === socket.id) mustAdvance = true;
-      }
-      // Schedule full purge if they never come back.
-      if (p.gracePurgeTimer) clearTimeout(p.gracePurgeTimer);
-      p.gracePurgeTimer = setTimeout(() => purgePlayer(socket.id), SESSION_GRACE_MS);
-      if (mustAdvance) advanceTurn(); else broadcast();
-    });
-  });
 
   function doAction(socket, action) {
     if (game.phase !== 'playing') return;
@@ -483,6 +417,118 @@ function setupBlackjack(nsp) {
       broadcast(); setTimeout(advanceTurn, 500); return;
     }
   }
+
+  return {
+    game, broadcast, log, publicState, clearTimer, startBetting,
+    findBySession, reattachSession, purgePlayer, doAction,
+    currentPlayerId, advanceTurn,
+  };
+  }
+
+  nsp.on('connection', (socket) => {
+    const roomId = sanitizeRoomId(socket.handshake.query.room);
+    const room = getOrCreateRoom(roomId);
+    if (!room) {
+      socket.emit('error_msg', 'Servidor lleno (demasiadas salas).');
+      socket.disconnect(true);
+      return;
+    }
+    socket.data.roomId = roomId;
+    socket.join(roomId);
+
+    const isHost = isLocalhostAddr(socket.handshake.address);
+    socket.data.isHost = isHost;
+    socket.emit('hello', { isHost, roomId });
+    socket.emit('state', room.publicState());
+
+    socket.on('join', (payload) => {
+      const rawName = typeof payload === 'string' ? payload : payload?.name;
+      const sessionId = typeof payload === 'object' && payload ? payload.sessionId : null;
+
+      if (sessionId) {
+        const player = room.reattachSession(sessionId, socket, isHost, rawName);
+        if (player) {
+          socket.data.isHost = isHost;
+          socket.emit('joined', { id: socket.id, sessionId: player.sessionId, name: player.name, isHost, roomId });
+          room.log(`${player.name} se reconectó.`);
+          room.broadcast();
+          return;
+        }
+      }
+
+      if (room.game.players.has(socket.id)) return;
+      const name = cleanName(rawName) || `Jugador ${room.game.order.length + 1}`;
+      if (room.game.order.length >= MAX_SEATS) { socket.emit('error_msg', `Mesa llena (máx ${MAX_SEATS}).`); return; }
+      const newSessionId = crypto.randomUUID();
+      room.game.players.set(socket.id, {
+        sessionId: newSessionId,
+        name, chips: STARTING_CHIPS, bet: 0,
+        sideBets: { under: 0, exact: 0, over: 0 }, sideResults: null, sideTotal: null,
+        hands: [], currentHandIdx: 0, status: 'idle', connected: true, isHost,
+        rebuyRequested: false, gracePurgeTimer: null,
+      });
+      room.game.order.push(socket.id);
+      room.log(`${name} se sentó${isHost ? ' (HOST ★)' : ''}.`);
+      socket.emit('joined', { id: socket.id, sessionId: newSessionId, name, isHost, roomId });
+      if (room.game.phase === 'waiting') room.startBetting(); else room.broadcast();
+    });
+
+    socket.on('request_rebuy', () => {
+      const p = room.game.players.get(socket.id); if (!p) return;
+      if (p.chips >= MIN_BET) { socket.emit('error_msg', 'Aún tienes fichas suficientes.'); return; }
+      if (p.rebuyRequested) return;
+      p.rebuyRequested = true;
+      room.log(`✋ ${p.name} pidió fichas al HOST.`);
+      room.broadcast();
+    });
+
+    socket.on('bet', (data) => {
+      if (room.game.phase !== 'betting') return;
+      const p = room.game.players.get(socket.id); if (!p) return;
+      const main  = Math.max(0, Math.floor(Number(data?.main)  || 0));
+      const under = Math.max(0, Math.floor(Number(data?.under) || 0));
+      const exact = Math.max(0, Math.floor(Number(data?.exact) || 0));
+      const over  = Math.max(0, Math.floor(Number(data?.over)  || 0));
+      if (main < MIN_BET) { socket.emit('error_msg', `Apuesta principal mínima ${MIN_BET}.`); return; }
+      const requested = main + under + exact + over;
+      const available = p.chips + p.bet + p.sideBets.under + p.sideBets.exact + p.sideBets.over;
+      if (requested > available) { socket.emit('error_msg', 'No tienes suficientes fichas.'); return; }
+      p.chips = available - requested;
+      p.bet = main;
+      p.sideBets = { under, exact, over };
+      p.status = 'betting';
+      room.broadcast();
+    });
+
+    socket.on('hit',       () => room.doAction(socket, 'hit'));
+    socket.on('stand',     () => room.doAction(socket, 'stand'));
+    socket.on('double',    () => room.doAction(socket, 'double'));
+    socket.on('split',     () => room.doAction(socket, 'split'));
+    socket.on('surrender', () => room.doAction(socket, 'surrender'));
+
+    socket.on('host_rebuy', (targetId) => {
+      if (!socket.data.isHost) { socket.emit('error_msg', 'Solo el HOST puede dar fichas.'); return; }
+      const p = room.game.players.get(targetId); if (!p) return;
+      p.chips += REBUY_AMOUNT;
+      p.rebuyRequested = false;
+      room.log(`HOST le dio ${REBUY_AMOUNT} a ${p.name}.`);
+      room.broadcast();
+    });
+
+    socket.on('disconnect', () => {
+      const p = room.game.players.get(socket.id); if (!p) return;
+      p.connected = false;
+      room.log(`${p.name} se desconectó (sesión guardada).`);
+      let mustAdvance = false;
+      if (room.game.phase === 'playing') {
+        for (const h of p.hands) if (h.status === 'playing') h.status = 'stood';
+        if (room.currentPlayerId() === socket.id) mustAdvance = true;
+      }
+      if (p.gracePurgeTimer) clearTimeout(p.gracePurgeTimer);
+      p.gracePurgeTimer = setTimeout(() => room.purgePlayer(socket.id), SESSION_GRACE_MS);
+      if (mustAdvance) room.advanceTurn(); else room.broadcast();
+    });
+  });
 }
 
 // ============================================================
@@ -576,6 +622,29 @@ function setupPoker(nsp) {
     return 0;
   }
 
+  const rooms = new Map();
+
+  function getOrCreateRoom(roomId) {
+    let r = rooms.get(roomId);
+    if (!r) {
+      if (rooms.size >= MAX_ROOMS_PER_NAMESPACE) return null;
+      r = createRoom(roomId);
+      rooms.set(roomId, r);
+    }
+    return r;
+  }
+
+  function destroyIfEmpty(roomId) {
+    const r = rooms.get(roomId);
+    if (!r) return;
+    if (r.game.players.size === 0) {
+      r.clearTimer();
+      if (r.game.startCountdown) clearTimeout(r.game.startCountdown);
+      rooms.delete(roomId);
+    }
+  }
+
+  function createRoom(roomId) {
   const game = {
     phase: 'waiting',
     players: new Map(),
@@ -601,12 +670,15 @@ function setupPoker(nsp) {
     game.phaseEndsAt = Date.now() + ms;
     game.timer = setTimeout(fn, ms);
   }
-  function log(msg) { nsp.emit('log', { t: Date.now(), msg }); }
+  function log(msg) { nsp.to(roomId).emit('log', { t: Date.now(), msg }); }
   function broadcast() {
     // Per-socket emit with redacted hole cards for opponents.
     // Prevents the server from leaking everyone's hole cards on the wire.
-    for (const [sid, sock] of nsp.sockets) {
-      sock.emit('state', publicStateFor(sid));
+    const sids = nsp.adapter.rooms.get(roomId);
+    if (!sids) return;
+    for (const sid of sids) {
+      const sock = nsp.sockets.get(sid);
+      if (sock) sock.emit('state', publicStateFor(sid));
     }
   }
 
@@ -970,98 +1042,110 @@ function setupPoker(nsp) {
     }
   }
 
+  return {
+    game, broadcast, log, publicStateFor, clearTimer,
+    tryStartHand, doAction, afterAction, awardByFold,
+  };
+  }
+
   nsp.on('connection', (socket) => {
+    const roomId = sanitizeRoomId(socket.handshake.query.room);
+    const room = getOrCreateRoom(roomId);
+    if (!room) {
+      socket.emit('error_msg', 'Servidor lleno (demasiadas salas).');
+      socket.disconnect(true);
+      return;
+    }
+    socket.data.roomId = roomId;
+    socket.join(roomId);
+
     const isHost = isLocalhostAddr(socket.handshake.address);
     socket.data.isHost = isHost;
-    socket.emit('hello', { isHost });
-    socket.emit('state', publicStateFor(socket.id));
+    socket.emit('hello', { isHost, roomId });
+    socket.emit('state', room.publicStateFor(socket.id));
 
     socket.on('join', (rawName) => {
-      if (game.players.has(socket.id)) return;
-      const name = String(rawName || '').trim().slice(0, 16) || `Jugador ${game.order.length + 1}`;
-      if (game.order.length >= MAX_SEATS) { socket.emit('error_msg', `Mesa llena (máx ${MAX_SEATS}).`); return; }
-      game.players.set(socket.id, {
+      if (room.game.players.has(socket.id)) return;
+      const name = String(rawName || '').trim().slice(0, 16) || `Jugador ${room.game.order.length + 1}`;
+      if (room.game.order.length >= MAX_SEATS) { socket.emit('error_msg', `Mesa llena (máx ${MAX_SEATS}).`); return; }
+      room.game.players.set(socket.id, {
         name, chips: STARTING_CHIPS, bet: 0, totalBet: 0,
         hole: [], holeRevealed: false, status: 'idle', acted: false,
         lastAction: null, handLabel: null, winnings: 0,
         connected: true, isHost,
       });
-      game.order.push(socket.id);
-      log(`${name} se sentó${isHost ? ' (HOST ★)' : ''}.`);
-      socket.emit('joined', { id: socket.id, name, isHost });
-      if (game.phase === 'waiting') {
-        if (game.order.filter((id) => game.players.get(id).chips > 0).length >= 2) {
-          if (!game.startCountdown) {
-            log('Empezando en 4s…');
-            game.startCountdown = setTimeout(() => {
-              game.startCountdown = null;
-              tryStartHand();
+      room.game.order.push(socket.id);
+      room.log(`${name} se sentó${isHost ? ' (HOST ★)' : ''}.`);
+      socket.emit('joined', { id: socket.id, name, isHost, roomId });
+      if (room.game.phase === 'waiting') {
+        if (room.game.order.filter((id) => room.game.players.get(id).chips > 0).length >= 2) {
+          if (!room.game.startCountdown) {
+            room.log('Empezando en 4s…');
+            room.game.startCountdown = setTimeout(() => {
+              room.game.startCountdown = null;
+              room.tryStartHand();
             }, 4000);
           }
         }
       }
-      broadcast();
+      room.broadcast();
     });
 
-    socket.on('fold',  () => doAction(socket, 'fold'));
-    socket.on('check', () => doAction(socket, 'check'));
-    socket.on('call',  () => doAction(socket, 'call'));
-    socket.on('raise', (amt) => doAction(socket, 'raise', amt));
-    socket.on('allin', () => doAction(socket, 'allin'));
+    socket.on('fold',  () => room.doAction(socket, 'fold'));
+    socket.on('check', () => room.doAction(socket, 'check'));
+    socket.on('call',  () => room.doAction(socket, 'call'));
+    socket.on('raise', (amt) => room.doAction(socket, 'raise', amt));
+    socket.on('allin', () => room.doAction(socket, 'allin'));
 
     socket.on('host_rebuy', (targetId) => {
       if (!socket.data.isHost) { socket.emit('error_msg', 'Solo el HOST puede dar fichas.'); return; }
-      const p = game.players.get(targetId); if (!p) return;
+      const p = room.game.players.get(targetId); if (!p) return;
       p.chips += REBUY_AMOUNT;
-      log(`HOST le dio ${REBUY_AMOUNT} a ${p.name}.`);
-      broadcast();
-      // Maybe trigger a hand start if we now have 2 with chips
-      if (game.phase === 'waiting' && !game.startCountdown) {
-        if (game.order.filter((id) => game.players.get(id).chips > 0).length >= 2) {
-          game.startCountdown = setTimeout(() => { game.startCountdown = null; tryStartHand(); }, 2000);
+      room.log(`HOST le dio ${REBUY_AMOUNT} a ${p.name}.`);
+      room.broadcast();
+      if (room.game.phase === 'waiting' && !room.game.startCountdown) {
+        if (room.game.order.filter((id) => room.game.players.get(id).chips > 0).length >= 2) {
+          room.game.startCountdown = setTimeout(() => { room.game.startCountdown = null; room.tryStartHand(); }, 2000);
         }
       }
     });
 
     socket.on('disconnect', () => {
-      const p = game.players.get(socket.id); if (!p) return;
-      log(`${p.name} se fue.`);
-      const wasInHand = game.handOrder.includes(socket.id);
-      const wasTurn = wasInHand && game.handOrder[game.currentTurnIdx] === socket.id;
-      // Mark folded if mid-hand
+      const g = room.game;
+      const p = g.players.get(socket.id); if (!p) return;
+      room.log(`${p.name} se fue.`);
+      const wasInHand = g.handOrder.includes(socket.id);
+      const wasTurn = wasInHand && g.handOrder[g.currentTurnIdx] === socket.id;
       if (wasInHand && p.status !== 'folded') {
         p.status = 'folded';
         p.acted = true;
       }
-      const seatIdx = game.order.indexOf(socket.id);
-      game.order = game.order.filter((id) => id !== socket.id);
-      // Adjust dealerSeat
-      if (seatIdx >= 0 && seatIdx < game.dealerSeat) game.dealerSeat--;
-      if (game.dealerSeat >= game.order.length) game.dealerSeat = 0;
-      // We keep player data until end of hand for pot calculation
-      // Actually simplest: delete and remove from handOrder
-      game.handOrder = game.handOrder.filter((id) => id !== socket.id);
-      game.players.delete(socket.id);
+      const seatIdx = g.order.indexOf(socket.id);
+      g.order = g.order.filter((id) => id !== socket.id);
+      if (seatIdx >= 0 && seatIdx < g.dealerSeat) g.dealerSeat--;
+      if (g.dealerSeat >= g.order.length) g.dealerSeat = 0;
+      g.handOrder = g.handOrder.filter((id) => id !== socket.id);
+      g.players.delete(socket.id);
 
-      if (game.order.length === 0) {
-        game.phase = 'waiting'; game.currentTurnIdx = -1; clearTimer(); broadcast(); return;
+      if (g.order.length === 0) {
+        g.phase = 'waiting'; g.currentTurnIdx = -1; room.clearTimer(); room.broadcast();
+        destroyIfEmpty(roomId);
+        return;
       }
 
       if (wasInHand) {
-        const stillIn = game.handOrder.filter((id) => game.players.get(id).status !== 'folded');
-        if (stillIn.length === 1 && game.phase !== 'showdown' && game.phase !== 'settle') {
-          awardByFold(stillIn[0]); return;
+        const stillIn = g.handOrder.filter((id) => g.players.get(id).status !== 'folded');
+        if (stillIn.length === 1 && g.phase !== 'showdown' && g.phase !== 'settle') {
+          room.awardByFold(stillIn[0]); return;
         }
         if (wasTurn) {
-          // Re-find next
-          game.currentTurnIdx = Math.max(-1, game.currentTurnIdx - 1);
-          if (game.handOrder.length > 0) afterAction();
+          g.currentTurnIdx = Math.max(-1, g.currentTurnIdx - 1);
+          if (g.handOrder.length > 0) room.afterAction();
         } else {
-          // Reindex currentTurnIdx if needed
-          if (game.currentTurnIdx >= game.handOrder.length) game.currentTurnIdx = 0;
+          if (g.currentTurnIdx >= g.handOrder.length) g.currentTurnIdx = 0;
         }
       }
-      broadcast();
+      room.broadcast();
     });
   });
 }

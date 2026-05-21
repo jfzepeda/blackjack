@@ -1,4 +1,11 @@
-const socket = io("/blackjack");
+const ROOM_ID_RE = /^[A-Za-z0-9_-]{1,16}$/;
+const DEFAULT_ROOM = "lobby";
+function sanitizeRoomId(raw) {
+  const s = typeof raw === "string" ? raw.trim() : "";
+  return ROOM_ID_RE.test(s) ? s : DEFAULT_ROOM;
+}
+const roomId = sanitizeRoomId(new URLSearchParams(location.search).get("room"));
+const socket = io("/blackjack", { query: { room: roomId } });
 const $ = (id) => document.getElementById(id);
 const phaseEl = $("phase");
 const phaseLabelEl = phaseEl?.querySelector(".phase-label") || phaseEl;
@@ -25,8 +32,8 @@ const MIN_BET = 10;
 const CHIP_ICO = `<svg class="chip-ico" viewBox="0 0 24 24" width="11" height="11" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="#ffd76a" stroke="#7a4622" stroke-width="2" stroke-dasharray="2.5 2"/><circle cx="12" cy="12" r="4" fill="#fff5c2" stroke="#7a4622" stroke-width="0.5"/></svg>`;
 
 // ====== Cookies / session ======
-const SESSION_COOKIE = "bj_session";
-const NAME_COOKIE = "bj_name";
+const SESSION_COOKIE = `bj_session__${roomId}`;
+const NAME_COOKIE = `bj_name__${roomId}`;
 function setCookie(name, value, days = 30) {
   const exp = new Date(Date.now() + days * 864e5).toUTCString();
   document.cookie = `${name}=${encodeURIComponent(
@@ -58,6 +65,32 @@ if (storedName && !isValidName(storedName)) {
   deleteCookie(SESSION_COOKIE);
   storedName = null;
   sessionId = null;
+}
+
+// ====== Room badge (sala) ======
+const roomCodeEl = $("roomCode");
+const copyRoomBtn = $("copyRoomBtn");
+const newRoomBtn = $("newRoomBtn");
+if (roomCodeEl) roomCodeEl.textContent = roomId === DEFAULT_ROOM ? "pública" : roomId;
+if (copyRoomBtn) {
+  copyRoomBtn.onclick = async () => {
+    const url = `${location.origin}/blackjack?room=${encodeURIComponent(roomId)}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      copyRoomBtn.classList.add("ok");
+      setTimeout(() => copyRoomBtn.classList.remove("ok"), 900);
+    } catch {
+      prompt("Copia el link:", url);
+    }
+  };
+}
+if (newRoomBtn) {
+  newRoomBtn.onclick = () => {
+    const code = Array.from({ length: 4 }, () =>
+      "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".charAt(Math.floor(Math.random() * 32))
+    ).join("");
+    location.href = `/blackjack?room=${code}`;
+  };
 }
 
 // Pending bet state (local until "Confirm")

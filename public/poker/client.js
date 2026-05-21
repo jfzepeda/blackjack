@@ -1,4 +1,11 @@
-const socket = io('/poker');
+const ROOM_ID_RE = /^[A-Za-z0-9_-]{1,16}$/;
+const DEFAULT_ROOM = 'lobby';
+function sanitizeRoomId(raw) {
+  const s = typeof raw === 'string' ? raw.trim() : '';
+  return ROOM_ID_RE.test(s) ? s : DEFAULT_ROOM;
+}
+const roomId = sanitizeRoomId(new URLSearchParams(location.search).get('room'));
+const socket = io('/poker', { query: { room: roomId } });
 const $ = (id) => document.getElementById(id);
 const phaseLabelEl = document.querySelector('#phase .phase-label');
 const timerEl   = $('timer');
@@ -592,6 +599,32 @@ socket.on('log', ({ msg }) => {
   while (logEl.children.length > 60) logEl.removeChild(logEl.firstChild);
   logEl.scrollTop = logEl.scrollHeight;
 });
+
+// ====== Room badge (sala) ======
+const roomCodeEl = $('roomCode');
+const copyRoomBtn = $('copyRoomBtn');
+const newRoomBtn = $('newRoomBtn');
+if (roomCodeEl) roomCodeEl.textContent = roomId === DEFAULT_ROOM ? 'pública' : roomId;
+if (copyRoomBtn) {
+  copyRoomBtn.onclick = async () => {
+    const url = `${location.origin}/poker?room=${encodeURIComponent(roomId)}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      copyRoomBtn.classList.add('ok');
+      setTimeout(() => copyRoomBtn.classList.remove('ok'), 900);
+    } catch {
+      prompt('Copia el link:', url);
+    }
+  };
+}
+if (newRoomBtn) {
+  newRoomBtn.onclick = () => {
+    const code = Array.from({ length: 4 }, () =>
+      'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'.charAt(Math.floor(Math.random() * 32))
+    ).join('');
+    location.href = `/poker?room=${code}`;
+  };
+}
 
 joinBtn.onclick = () => socket.emit('join', nameInput.value.trim());
 nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') joinBtn.click(); });
