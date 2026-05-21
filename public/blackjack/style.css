@@ -460,6 +460,7 @@ main { display: flex; flex-direction: column; gap: 16px; }
 
 .play-area.no-local-hand { grid-template-columns: minmax(0, 1fr); }
 .play-area.no-local-hand #table { display: none; }
+.play-area #controls { min-width: 0; }
 
 /* Turn pool — soft accent glow under the active stack */
 .felt-slot.turn .chip-stack-shadow {
@@ -835,7 +836,7 @@ main { display: flex; flex-direction: column; gap: 16px; }
    ============================================================ */
 .play-area {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
   gap: 14px;
   align-items: start;
 }
@@ -844,8 +845,6 @@ main { display: flex; flex-direction: column; gap: 16px; }
    Leaderboard
    ============================================================ */
 .leaderboard {
-  position: sticky;
-  top: 14px;
   padding: 18px 20px 16px;
   border-radius: 22px;
   overflow: hidden;
